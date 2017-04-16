@@ -96,7 +96,7 @@ define(['require',
                 }
             },
             setValues: function(manual) {
-                if (Utils.getUrlState.isTagTab() || (Utils.getUrlState.isInitial() && !Globals.taxonomy)) {
+                if (Utils.getUrlState.isTagTab()) {
                     if (!this.tag) {
                         this.selectFirst = false;
                         this.ui.tagsParent.find('li').first().addClass('active');
@@ -144,18 +144,17 @@ define(['require',
                 };
                 that.collection.fullCollection.sort().each(function(model) {
                     var name = Utils.getName(model.toJSON(), 'name');
-                    if (name.indexOf(".") > -1) {
-                        return;
-                    }
-                    if (searchString) {
-                        if (name.search(new RegExp(searchString, "i")) != -1) {
-                            // data-name="<space>'<tagName>'"  Space is required for DSL search Input 
-                            str += '<li class="parent-node" data-id="tags"><div class="tools"><i class="fa fa-ellipsis-h tagPopover"></i></div><a href="#!/tag/tagAttribute/' + name + '"  data-name=" `' + name + '`" >' + name + '</a></li>';
+                    var checkTagOrTerm = Utils.checkTagOrTerm(name);
+                    if (checkTagOrTerm.tag) {
+                        if (searchString) {
+                            if (name.search(new RegExp(searchString, "i")) != -1) {
+                                str += '<li class="parent-node" data-id="tags"><div class="tools"><i class="fa fa-ellipsis-h tagPopover"></i></div><a href="#!/tag/tagAttribute/' + name + '"  data-name="' + name + '" >' + name + '</a></li>';
+                            } else {
+                                return;
+                            }
                         } else {
-                            return;
+                            str += '<li class="parent-node" data-id="tags"><div class="tools"><i class="fa fa-ellipsis-h tagPopover"></i></div><a href="#!/tag/tagAttribute/' + name + '"  data-name="' + name + '">' + name + '</a></li>';
                         }
-                    } else {
-                        str += '<li class="parent-node" data-id="tags"><div class="tools"><i class="fa fa-ellipsis-h tagPopover"></i></div><a href="#!/tag/tagAttribute/' + name + '"  data-name=" `' + name + '`">' + name + '</a></li>';
                     }
                 });
                 this.ui.tagsParent.empty().html(str);
@@ -221,6 +220,7 @@ define(['require',
                 }
                 modal.$el.find(".attributeInput").keyup(function() {
                     $(this).css('borderColor', "#e8e9ee");
+                    modal.$el.find('button.ok').removeAttr("disabled");
                 });
                 if (!validate) {
                     Utils.notifyInfo({
@@ -228,6 +228,7 @@ define(['require',
                     });
                     return;
                 }
+
                 this.name = ref.ui.tagName.val();
                 this.description = ref.ui.description.val();
                 var superTypes = [];
@@ -237,6 +238,57 @@ define(['require',
                 var attributeObj = ref.collection.toJSON();
                 if (ref.collection.length === 1 && ref.collection.first().get("name") === "") {
                     attributeObj = [];
+                }
+
+                if (attributeObj.length) {
+                    var superTypesAttributes = [];
+                    _.each(superTypes, function(name) {
+                        var parentTags = that.collection.fullCollection.findWhere({ name: name });
+                        superTypesAttributes = superTypesAttributes.concat(parentTags.get('attributeDefs'));
+                    });
+
+
+                    var duplicateAttributeList = [];
+                    _.each(attributeObj, function(obj) {
+                        var duplicateCheck = _.find(superTypesAttributes, function(activeTagObj) {
+                            return activeTagObj.name.toLowerCase() === obj.name.toLowerCase();
+                        });
+                        if (duplicateCheck) {
+                            duplicateAttributeList.push(obj.name);
+                        }
+                    });
+
+
+                    var notifyObj = {
+                        confirm: {
+                            confirm: true,
+                            buttons: [{
+                                    text: 'Ok',
+                                    addClass: 'btn-primary',
+                                    click: function(notice) {
+                                        notice.remove();
+                                    }
+                                },
+                                null
+                            ]
+                        }
+                    }
+
+                    if (duplicateAttributeList.length) {
+                        if (duplicateAttributeList.length < 2) {
+                            var text = "Attribute <b>" + duplicateAttributeList.join(",") + "</b> is duplicate !"
+                        } else {
+                            if (attributeObj.length > duplicateAttributeList.length) {
+                                var text = "Attributes: <b>" + duplicateAttributeList.join(",") + "</b> are duplicate !"
+                            } else {
+                                var text = "All attributes are duplicate !"
+                            }
+                        }
+                        notifyObj['text'] = text;
+                        Utils.notifyConfirm(notifyObj);
+                        return false;
+                    }
+
                 }
                 this.json = {
                     classificationDefs: [{
@@ -305,9 +357,9 @@ define(['require',
                 Utils.setUrl({
                     url: '#!/search/searchResult',
                     urlParams: {
-                        query: this.ui.tagsParent.find('li.active').find("a").data('name'),
-                        searchType: "dsl",
-                        dslChecked: true
+                        tag: this.ui.tagsParent.find('li.active').find("a").data('name'),
+                        searchType: "basic",
+                        dslChecked: false
                     },
                     updateTabState: function() {
                         return { searchUrl: this.url, stateChanged: true };

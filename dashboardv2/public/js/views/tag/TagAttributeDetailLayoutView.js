@@ -45,7 +45,8 @@ define(['require',
                 addTagPlus: '[data-id="addTagPlus"]',
                 addTagBtn: '[data-id="addTagBtn"]',
                 description: '[data-id="description"]',
-                publishButton: '[data-id="publishButton"]'
+                publishButton: '[data-id="publishButton"]',
+                showSuperType: "[data-id='showSuperType']"
             },
             /** ui events hash */
             events: function() {
@@ -100,8 +101,9 @@ define(['require',
             },
             renderTagDetail: function() {
                 var attributeData = "",
-                    attributeDefs = this.model.get("attributeDefs");
-
+                    supertypeData = "",
+                    attributeDefs = this.model.get("attributeDefs"),
+                    superTypeArr = this.model.get('superTypes');
                 this.ui.title.html('<span>' + (Utils.getName(this.model.toJSON())) + '</span>');
                 if (this.model.get("description")) {
                     this.ui.description.text(this.model.get("description"));
@@ -115,20 +117,26 @@ define(['require',
                     });
                     this.ui.showAttribute.html(attributeData);
                 }
+                if (superTypeArr.length > 0) {
+                    this.$(".superType").show();
+                    _.each(superTypeArr, function(value, key) {
+                        supertypeData += ' <a class="inputAttribute" href="#!/tag/tagAttribute/' + value + '">' + value + '</a>';
+                    });
+                    this.ui.showSuperType.html(supertypeData);
+                }
                 Utils.hideTitleLoader(this.$('.fontLoader'), this.$('.tagDetail'));
             },
             onSaveButton: function(saveObject, message) {
-                Utils.showTitleLoader(this.$('.page-title .fontLoader'), this.$('.tagDetail'));
                 var that = this;
                 var validate = true;
-                if (this.modal.$el.find(".attributeInput").length > 1) {
-                    this.modal.$el.find(".attributeInput").each(function() {
-                        if ($(this).val() === "") {
-                            $(this).css('borderColor', "red")
-                            validate = false;
-                        }
-                    });
-                }
+
+                this.modal.$el.find(".attributeInput").each(function() {
+                    if ($(this).val() === "") {
+                        $(this).css('borderColor', "red")
+                        validate = false;
+                    }
+                });
+
                 this.modal.$el.find(".attributeInput").keyup(function() {
                     $(this).css('borderColor', "#e8e9ee");
                 });
@@ -138,8 +146,8 @@ define(['require',
                     });
                     return;
                 }
-
-                this.model.saveTagAttribute(this.model.get('guid'), {
+                Utils.showTitleLoader(this.$('.page-title .fontLoader'), this.$('.tagDetail'));
+                this.model.saveTagAttribute({
                     data: JSON.stringify({
                         classificationDefs: [saveObject],
                         entityDefs: [],
@@ -155,9 +163,12 @@ define(['require',
                         Utils.notifySuccess({
                             content: message
                         });
-                        that.modal.close();
+                    },
+                    cust_error: function() {
+                        Utils.hideTitleLoader(that.$('.fontLoader'), that.$('.tagDetail'));
                     }
                 });
+                that.modal.close();
             },
             onClickAddTagAttributeBtn: function(e) {
                 var that = this;
@@ -172,30 +183,72 @@ define(['require',
                             cancelText: "Cancel",
                             okText: 'Add',
                             allowCancel: true,
+                            okCloses: false
                         }).open();
                         that.modal.$el.find('button.ok').attr("disabled", "true");
-                        $(view.ui.addAttributeDiv).on('keyup', that.modal.$el.find('attributeInput'), function(e) {
-                            if ((e.keyCode == 8 || e.keyCode == 46 || e.keyCode == 32) && e.target.value.trim() == "") {
+                        view.ui.addAttributeDiv.on('keyup', '.attributeInput', function(e) {
+                            if (e.target.value.trim() == "") {
                                 that.modal.$el.find('button.ok').attr("disabled", "disabled");
                             } else {
                                 that.modal.$el.find('button.ok').removeAttr("disabled");
                             }
                         });
                         that.modal.on('ok', function() {
-                            var newAttributeList = view.collection.toJSON();
-                            try {
-                                var saveJSON = JSON.parse(JSON.stringify(that.model.toJSON()));
-                            } catch (err) {
-                                Utils.serverErrorHandler();
-                            }
-                            if (saveJSON) {
-                                var oldAttributeList = saveJSON.attributeDefs;
-                            }
-                            _.each(newAttributeList, function(obj) {
-                                oldAttributeList.push(obj);
+                            var newAttributeList = view.collection.toJSON(),
+                                activeTagAttribute = _.extend([], that.model.get('attributeDefs')),
+                                superTypes = that.model.get('superTypes');
+
+                            _.each(superTypes, function(name) {
+                                var parentTags = that.collection.fullCollection.findWhere({ name: name });
+                                activeTagAttribute = activeTagAttribute.concat(parentTags.get('attributeDefs'));
                             });
-                            if (saveJSON) {
-                                that.onSaveButton(saveJSON, Messages.addAttributeSuccessMessage);
+
+                            var duplicateAttributeList = [],
+                                saveObj = $.extend(true, {}, that.model.toJSON());
+                            _.each(newAttributeList, function(obj) {
+                                var duplicateCheck = _.find(activeTagAttribute, function(activeTagObj) {
+                                    return activeTagObj.name.toLowerCase() === obj.name.toLowerCase();
+                                });
+                                if (duplicateCheck) {
+                                    duplicateAttributeList.push(obj.name);
+                                } else {
+                                    saveObj.attributeDefs.push(obj);
+                                }
+                            });
+                            var notifyObj = {
+                                confirm: {
+                                    confirm: true,
+                                    buttons: [{
+                                            text: 'Ok',
+                                            addClass: 'btn-primary',
+                                            click: function(notice) {
+                                                notice.remove();
+                                            }
+                                        },
+                                        null
+                                    ]
+                                }
+                            }
+                            if (saveObj && !duplicateAttributeList.length) {
+                                that.onSaveButton(saveObj, Messages.addAttributeSuccessMessage);
+                            } else {
+                                if (duplicateAttributeList.length < 2) {
+                                    var text = "Attribute <b>" + duplicateAttributeList.join(",") + "</b> is duplicate !"
+                                } else {
+                                    if (newAttributeList.length > duplicateAttributeList.length) {
+                                        var text = "Attributes: <b>" + duplicateAttributeList.join(",") + "</b> are duplicate ! Do you want to continue with other attributes ?"
+                                        notifyObj = {
+                                            ok: function(argument) {
+                                                that.onSaveButton(saveObj, Messages.addAttributeSuccessMessage);
+                                            },
+                                            cancel: function(argument) {}
+                                        }
+                                    } else {
+                                        var text = "All attributes are duplicate !"
+                                    }
+                                }
+                                notifyObj['text'] = text;
+                                Utils.notifyConfirm(notifyObj);
                             }
                         });
                         that.modal.on('closeModal', function() {

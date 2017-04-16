@@ -17,10 +17,14 @@
  */
 package org.apache.atlas.web.rest;
 
+import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.discovery.AtlasDiscoveryService;
 import org.apache.atlas.model.discovery.AtlasSearchResult;
+import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -36,6 +40,8 @@ import javax.ws.rs.QueryParam;
 @Path("v2/search")
 @Singleton
 public class DiscoveryREST {
+    private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("rest.DiscoveryREST");
+
     private final AtlasDiscoveryService atlasDiscoveryService;
 
     @Inject
@@ -46,6 +52,8 @@ public class DiscoveryREST {
     /**
      * Retrieve data for the specified DSL
      * @param query DSL query
+     * @param typeName limit the result to only entities of specified type or its sub-types
+     * @param classification limit the result to only entities tagged with the given classification or or its sub-types
      * @param limit limit the result set to only include the specified number of entries
      * @param offset start offset of the result set (useful for pagination)
      * @return Search results
@@ -58,13 +66,36 @@ public class DiscoveryREST {
     @Path("/dsl")
     @Consumes(Servlets.JSON_MEDIA_TYPE)
     @Produces(Servlets.JSON_MEDIA_TYPE)
-    public AtlasSearchResult searchUsingDSL(@QueryParam("query") String query,
-                                            @QueryParam("limit") int limit,
-                                            @QueryParam("offset") int offset) throws AtlasBaseException {
+    public AtlasSearchResult searchUsingDSL(@QueryParam("query")          String query,
+                                            @QueryParam("typeName")       String typeName,
+                                            @QueryParam("classification") String classification,
+                                            @QueryParam("limit")          int    limit,
+                                            @QueryParam("offset")         int    offset) throws AtlasBaseException {
+        AtlasPerfTracer perf = null;
 
-        AtlasSearchResult ret = atlasDiscoveryService.searchUsingDslQuery(query, limit, offset);
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "DiscoveryREST.searchUsingDSL(" + query + "," + typeName
+                                                            +  "," + classification + "," + limit + "," + offset + ")");
+            }
 
-        return ret;
+            String queryStr = query == null ? "" : query;
+
+            if (StringUtils.isNoneEmpty(typeName)) {
+                queryStr = typeName + " " + queryStr;
+            }
+
+            if (StringUtils.isNoneEmpty(classification)) {
+                // isa works with a type name only - like hive_column isa PII; it doesn't work with more complex query
+                if (StringUtils.isEmpty(query)) {
+                    queryStr += (" isa " + classification);
+                }
+            }
+
+            return atlasDiscoveryService.searchUsingDslQuery(queryStr, limit, offset);
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
     }
 
     /**
@@ -82,12 +113,98 @@ public class DiscoveryREST {
     @Path("/fulltext")
     @Consumes(Servlets.JSON_MEDIA_TYPE)
     @Produces(Servlets.JSON_MEDIA_TYPE)
-    public AtlasSearchResult searchUsingFullText(@QueryParam("query") String query,
-                                                 @QueryParam("limit") int limit,
-                                                 @QueryParam("offset") int offset) throws AtlasBaseException {
+    public AtlasSearchResult searchUsingFullText(@QueryParam("query")  String query,
+                                                 @QueryParam("limit")  int    limit,
+                                                 @QueryParam("offset") int    offset) throws AtlasBaseException {
+        AtlasPerfTracer perf = null;
 
-        AtlasSearchResult ret = atlasDiscoveryService.searchUsingFullTextQuery(query, limit, offset);
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "DiscoveryREST.searchUsingFullText(" + query + "," +
+                                                               limit + "," + offset + ")");
+            }
 
-        return ret;
+            return atlasDiscoveryService.searchUsingFullTextQuery(query, limit, offset);
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
+    }
+
+    /**
+     * Retrieve data for the specified fulltext query
+     * @param query Fulltext query
+     * @param typeName limit the result to only entities of specified type or its sub-types
+     * @param classification limit the result to only entities tagged with the given classification or or its sub-types
+     * @param limit limit the result set to only include the specified number of entries
+     * @param offset start offset of the result set (useful for pagination)
+     * @return Search results
+     * @throws AtlasBaseException
+     * @HTTP 200 On successful FullText lookup with some results, might return an empty list if execution succeeded
+     * without any results
+     * @HTTP 400 Invalid fulltext or query parameters
+     */
+    @GET
+    @Path("/basic")
+    @Consumes(Servlets.JSON_MEDIA_TYPE)
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    public AtlasSearchResult searchUsingBasic(@QueryParam("query")          String  query,
+                                              @QueryParam("typeName")       String  typeName,
+                                              @QueryParam("classification") String  classification,
+                                              @QueryParam("limit")          int     limit,
+                                              @QueryParam("offset")         int     offset) throws AtlasBaseException {
+        AtlasPerfTracer perf = null;
+
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "DiscoveryREST.searchUsingBasic(" + query + "," +
+                                                    typeName + "," + classification + "," + limit + "," + offset + ")");
+            }
+
+            return atlasDiscoveryService.searchUsingBasicQuery(query, typeName, classification, null, null, limit, offset);
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
+    }
+
+    /**
+     * Retrieve data for the specified attribute search query
+     * @param attrName  Attribute name
+     * @param attrValuePrefix Attibute value to search on
+     * @param typeName limit the result to only entities of specified type or its sub-types
+     * @param limit limit the result set to only include the specified number of entries
+     * @param offset start offset of the result set (useful for pagination)
+     * @return Search results
+     * @throws AtlasBaseException
+     * @HTTP 200 On successful FullText lookup with some results, might return an empty list if execution succeeded
+     * without any results
+     * @HTTP 400 Invalid wildcard or query parameters
+     */
+    @GET
+    @Path("/attribute")
+    @Consumes(Servlets.JSON_MEDIA_TYPE)
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    public AtlasSearchResult searchUsingAttribute(@QueryParam("attrName")  String attrName,
+                                                  @QueryParam("attrValuePrefix") String attrValuePrefix,
+                                                  @QueryParam("typeName")    String typeName,
+                                                  @QueryParam("limit")       int    limit,
+                                                  @QueryParam("offset")      int    offset) throws AtlasBaseException {
+        AtlasPerfTracer perf = null;
+
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "DiscoveryREST.searchUsingAttribute(" + attrName + "," +
+                        attrValuePrefix + "," + typeName + "," + limit + "," + offset + ")");
+            }
+
+            if (StringUtils.isEmpty(attrName) || StringUtils.isEmpty(attrValuePrefix)) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
+                        String.format("attrName : {0}, attrValue: {1} for attribute search.", attrName, attrValuePrefix));
+            }
+
+            return atlasDiscoveryService.searchUsingBasicQuery(null, typeName, null, attrName, attrValuePrefix, limit, offset);
+
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
     }
 }

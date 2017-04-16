@@ -28,7 +28,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>org.apache.atlas</groupId>
     <artifactId>apache-atlas</artifactId>
-    <version>0.8-incubating-SNAPSHOT</version>
+    <version>0.9-incubating-SNAPSHOT</version>
     <description>Metadata Management and Data Governance Platform over Hadoop</description>
     <name>apache-atlas</name>
     <packaging>pom</packaging>
@@ -399,6 +399,7 @@
             <timezone>America/Los_Angeles</timezone>
             <roles>
                 <role>committer</role>
+                <role>PPMC</role>
             </roles>
             <organization>Hortonworks Inc.</organization>
         </developer>
@@ -422,6 +423,46 @@
             </roles>
             <organization>IBM Corporation</organization>
             <!--<organizationUrl>http://www.ibm.com</organizationUrl>-->
+        </developer>
+        <developer>
+            <id>apoorvnaik</id>
+            <name>Apoorv Naik</name>
+            <email>apoorvnaik@apache.org</email>
+            <timezone>America/Los_Angeles</timezone>
+            <roles>
+                <role>committer</role>
+            </roles>
+            <organization>Hortonworks Inc.</organization>
+        </developer>
+        <developer>
+            <id>sarath</id>
+            <name>Sarath Subramanian</name>
+            <email>sarath@apache.org</email>
+            <timezone>America/Los_Angeles</timezone>
+            <roles>
+                <role>committer</role>
+            </roles>
+            <organization>Hortonworks Inc.</organization>
+        </developer>
+        <developer>
+            <id>ayubpathan</id>
+            <name>Ayub Pathan</name>
+            <email>ayubpathan@apache.org</email>
+            <timezone>Asia/Kolkata</timezone>
+            <roles>
+                <role>committer</role>
+            </roles>
+            <organization>Hortonworks Inc.</organization>
+        </developer>
+        <developer>
+            <id>nixon</id>
+            <name>Nixon Rodrigues</name>
+            <email>nixon@apache.org</email>
+            <timezone>Asia/Kolkata</timezone>
+            <roles>
+                <role>committer</role>
+            </roles>
+            <organization>Freestone Infotech</organization>
         </developer>
     </developers>
 

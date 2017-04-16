@@ -19,13 +19,13 @@ package org.apache.atlas.repository.graphdb;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.Map;
 import java.util.Set;
 
-import javax.script.Bindings;
 import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
 
+import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.groovy.GroovyExpression;
 import org.apache.atlas.typesystem.types.IDataType;
 
@@ -256,6 +256,20 @@ public interface AtlasGraph<V, E> {
     GroovyExpression addOutputTransformationPredicate(GroovyExpression expr, boolean isSelect, boolean isPath);
 
     /**
+     * Get an instance of the script engine to execute Gremlin queries
+     *
+     * @return script engine to execute Gremlin queries
+     */
+    ScriptEngine getGremlinScriptEngine() throws AtlasBaseException;
+
+    /**
+     * Release an instance of the script engine obtained with getGremlinScriptEngine()
+     *
+     * @param scriptEngine: ScriptEngine to release
+     */
+    void releaseGremlinScriptEngine(ScriptEngine scriptEngine);
+
+    /**
      * Executes a Gremlin script, returns an object with the result.
      *
      * @param gremlinQuery
@@ -265,7 +279,7 @@ public interface AtlasGraph<V, E> {
      *
      * @throws ScriptException
      */
-    Object executeGremlinScript(String query, boolean isPath) throws ScriptException;
+    Object executeGremlinScript(String query, boolean isPath) throws AtlasBaseException;
 
     /**
      * Executes a Gremlin script using a ScriptEngineManager provided by consumer, returns an object with the result.
@@ -280,7 +294,7 @@ public interface AtlasGraph<V, E> {
      *
      * @throws ScriptException
      */
-    Object executeGremlinScript(ScriptEngine scriptEngine, Bindings bindings, String query, boolean isPath) throws ScriptException;
+    Object executeGremlinScript(ScriptEngine scriptEngine, Map<? extends  String, ? extends  Object> bindings, String query, boolean isPath) throws ScriptException;
 
 
     /**

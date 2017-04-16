@@ -22,23 +22,27 @@ import com.google.inject.Inject;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasClient;
 import org.apache.atlas.AtlasErrorCode;
-import org.apache.atlas.AtlasException;
+import org.apache.atlas.authorize.AtlasActionTypes;
+import org.apache.atlas.authorize.AtlasResourceTypes;
+import org.apache.atlas.authorize.simple.AtlasAuthorizationUtils;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.impexp.AtlasExportRequest;
 import org.apache.atlas.model.impexp.AtlasExportResult;
 import org.apache.atlas.model.impexp.AtlasImportRequest;
 import org.apache.atlas.model.impexp.AtlasImportResult;
 import org.apache.atlas.model.metrics.AtlasMetrics;
+import org.apache.atlas.repository.impexp.ExportService;
+import org.apache.atlas.repository.impexp.ImportService;
+import org.apache.atlas.repository.impexp.ZipSink;
+import org.apache.atlas.repository.impexp.ZipSource;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.services.MetricsService;
-import org.apache.atlas.authorize.AtlasActionTypes;
-import org.apache.atlas.authorize.AtlasResourceTypes;
-import org.apache.atlas.authorize.simple.AtlasAuthorizationUtils;
 import org.apache.atlas.store.AtlasTypeDefStore;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.web.filters.AtlasCSRFPreventionFilter;
 import org.apache.atlas.web.service.ServiceState;
 import org.apache.atlas.web.util.Servlets;
+import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.apache.commons.lang.StringUtils;
@@ -51,7 +55,6 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import javax.inject.Singleton;
-import javax.servlet.ServletOutputStream;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.Consumes;
@@ -70,9 +73,6 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
-import org.apache.commons.configuration.Configuration;
-
-import static org.apache.atlas.repository.converters.AtlasInstanceConverter.toAtlasBaseException;
 
 
 /**
@@ -254,10 +254,11 @@ public class AdminResource {
                 for (GrantedAuthority c : authorities) {
                     groups.add(c.getAuthority());
                 }
+
                 isEntityUpdateAccessAllowed = AtlasAuthorizationUtils.isAccessAllowed(AtlasResourceTypes.ENTITY,
-                        AtlasActionTypes.UPDATE, userName, groups);
+                        AtlasActionTypes.UPDATE, userName, groups, httpServletRequest);
                 isEntityCreateAccessAllowed = AtlasAuthorizationUtils.isAccessAllowed(AtlasResourceTypes.ENTITY,
-                        AtlasActionTypes.CREATE, userName, groups);
+                        AtlasActionTypes.CREATE, userName, groups, httpServletRequest);
             }
 
             JSONObject responseData = new JSONObject();
@@ -318,23 +319,22 @@ public class AdminResource {
 
         ZipSink exportSink = null;
         try {
-            exportSink = new ZipSink();
+            exportSink = new ZipSink(httpServletResponse.getOutputStream());
             ExportService exportService = new ExportService(this.typeRegistry);
 
             AtlasExportResult result = exportService.run(exportSink, request, Servlets.getUserName(httpServletRequest),
                                                          Servlets.getHostName(httpServletRequest),
-                                                         Servlets.getRequestIpAddress(httpServletRequest));
+                                                         AtlasAuthorizationUtils.getRequestIpAddress(httpServletRequest));
 
             exportSink.close();
 
-            ServletOutputStream outStream = httpServletResponse.getOutputStream();
-            exportSink.writeTo(outStream);
-
+            httpServletResponse.addHeader("Content-Encoding","gzip");
             httpServletResponse.setContentType("application/zip");
             httpServletResponse.setHeader("Content-Disposition",
                                           "attachment; filename=" + result.getClass().getSimpleName());
+            httpServletResponse.setHeader("Transfer-Encoding", "chunked");
 
-            outStream.flush();
+            httpServletResponse.getOutputStream().flush();
             return Response.ok().build();
         } catch (IOException excp) {
             LOG.error("export() failed", excp);
@@ -369,13 +369,13 @@ public class AdminResource {
         try {
             AtlasImportRequest   request       = new AtlasImportRequest(Servlets.getParameterMap(httpServletRequest));
             ByteArrayInputStream inputStream   = new ByteArrayInputStream(bytes);
-            ImportService        importService = new ImportService(this.typesDefStore, this.entityStore);
+            ImportService importService = new ImportService(this.typesDefStore, this.entityStore, this.typeRegistry);
 
             ZipSource zipSource = new ZipSource(inputStream);
 
             result = importService.run(zipSource, request, Servlets.getUserName(httpServletRequest),
                                        Servlets.getHostName(httpServletRequest),
-                                       Servlets.getRequestIpAddress(httpServletRequest));
+                                       AtlasAuthorizationUtils.getRequestIpAddress(httpServletRequest));
         } catch (Exception excp) {
             LOG.error("importData(binary) failed", excp);
 
@@ -405,11 +405,11 @@ public class AdminResource {
 
         try {
             AtlasImportRequest request       = new AtlasImportRequest(Servlets.getParameterMap(httpServletRequest));
-            ImportService      importService = new ImportService(this.typesDefStore, this.entityStore);
+            ImportService      importService = new ImportService(this.typesDefStore, this.entityStore, this.typeRegistry);
 
             result = importService.run(request, Servlets.getUserName(httpServletRequest),
                                        Servlets.getHostName(httpServletRequest),
-                                       Servlets.getRequestIpAddress(httpServletRequest));
+                                       AtlasAuthorizationUtils.getRequestIpAddress(httpServletRequest));
         } catch (Exception excp) {
             LOG.error("importFile() failed", excp);
 

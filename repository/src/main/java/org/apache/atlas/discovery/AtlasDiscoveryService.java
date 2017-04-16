@@ -40,4 +40,18 @@ public interface AtlasDiscoveryService {
      * @return AtlasSearchResult
      */
     AtlasSearchResult searchUsingFullTextQuery(String query, int limit, int offset) throws AtlasBaseException;
+
+    /**
+     *
+     * @param query search query.
+     * @param type entity type.
+     * @param classification classification name.
+     * @param attrName attribute name.
+     * @param attrValuePrefix attribute value prefix.
+     * @param limit number of resultant rows (for pagination). [ limit > 0 ] and [ limit < maxlimit ]. -1 maps to atlas.search.defaultlimit property.
+     * @param offset offset to the results returned (for pagination). [ offset >= 0 ]. -1 maps to offset 0.
+     * @return AtlasSearchResult
+     */
+    AtlasSearchResult searchUsingBasicQuery(String query, String type, String classification, String attrName,
+                                            String attrValuePrefix, int limit, int offset) throws AtlasBaseException;
 }

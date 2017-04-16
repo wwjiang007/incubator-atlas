@@ -38,7 +38,7 @@ define(['require',
 
             /** Layout sub regions */
             regions: {
-                RTagLayoutView: "#r_tagLayoutView",
+                RSchemaTableLayoutView: "#r_schemaTableLayoutView",
             },
             /** ui selector cache */
             ui: {
@@ -99,7 +99,7 @@ define(['require',
                     includePagination: true,
                     includePageSize: false,
                     includeFooterRecords: true,
-                    includeOrderAbleColumns: true,
+                    includeOrderAbleColumns: false,
                     gridOpts: {
                         className: "table table-hover backgrid table-quickMenu",
                         emptyText: 'No records found!'
@@ -171,9 +171,11 @@ define(['require',
             },
             showLoader: function() {
                 this.$('.fontLoader').show();
+                this.$('.tableOverlay').show()
             },
             hideLoader: function(argument) {
                 this.$('.fontLoader').hide();
+                this.$('.tableOverlay').hide();
             },
             renderTableLayoutView: function() {
                 var that = this;
@@ -201,9 +203,8 @@ define(['require',
                     });
                     var columns = new columnCollection(that.getSchemaTableColumns());
                     //columns.setPositions().sort();
-                    that.RTagLayoutView.show(new TableLayout(_.extend({}, that.commonTableOptions, {
-                        columns: columns,
-                        includeOrderAbleColumns: true
+                    that.RSchemaTableLayoutView.show(new TableLayout(_.extend({}, that.commonTableOptions, {
+                        columns: columns
                     })));
                     that.$('.multiSelectTerm').hide();
                     that.$('.multiSelectTag').hide();

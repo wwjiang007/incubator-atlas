@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,20 +15,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.atlas.web.resources;
+package org.apache.atlas.hook;
 
-public enum ZipExportFileNames {
-    ATLAS_EXPORT_INFO_NAME("atlas-export-info"),
-    ATLAS_EXPORT_ORDER_NAME("atlas-export-order"),
-    ATLAS_TYPESDEF_NAME("atlas-typesdef");
+/**
+ * Exception class for Atlas Hooks.
+ */
+public class AtlasHookException extends Exception {
 
-    public final String name;
-    ZipExportFileNames(String name) {
-        this.name = name;
+    public AtlasHookException() {
     }
 
-    @Override
-    public String toString() {
-        return this.name;
+    public AtlasHookException(String message) {
+        super(message);
+    }
+
+    public AtlasHookException(String message, Throwable cause) {
+        super(message, cause);
+    }
+
+    public AtlasHookException(Throwable cause) {
+        super(cause);
+    }
+
+    public AtlasHookException(String message, Throwable cause, boolean enableSuppression, boolean writableStackTrace) {
+        super(message, cause, enableSuppression, writableStackTrace);
     }
 }

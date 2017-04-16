@@ -210,7 +210,13 @@ define(['require', 'utils/Globals', 'pnotify', 'utils/Messages', 'pnotify.button
             if (options.urlParams) {
                 var urlParams = "?";
                 _.each(options.urlParams, function(value, key, obj) {
-                    urlParams += key + "=" + value + "&";
+                    if (value != undefined || value != null) {
+                        value = String(value);
+                    }
+                    value = value || null;
+                    if (value) {
+                        urlParams += key + "=" + value + "&";
+                    }
                 });
                 urlParams = urlParams.slice(0, -1);
                 options.url += urlParams;
@@ -295,6 +301,11 @@ define(['require', 'utils/Globals', 'pnotify', 'utils/Messages', 'pnotify.button
                 fullName: value
             }
         }
+        if (value && _.isString(value)) {
+            value = {
+                typeName: value
+            }
+        }
         if (_.isObject(value)) {
             var name = "";
             if (value && value.$typeName$) {
@@ -306,11 +317,14 @@ define(['require', 'utils/Globals', 'pnotify', 'utils/Messages', 'pnotify.button
                 return {}
             }
             name = _.escape(name).split('.');
+
             var trem = false;
             if (value['taxonomy.namespace']) {
                 trem = true;
             } else if (value.values && value.values['taxonomy.namespace']) {
                 trem = true;
+            } else if (name.length > 1) {
+                trem = true; // Temp fix
             }
 
             if (trem) {
@@ -382,5 +396,52 @@ define(['require', 'utils/Globals', 'pnotify', 'utils/Messages', 'pnotify.button
         loaderEl.hide();
         titleBoxEl.fadeIn();
     }
+
+    $.fn.toggleAttribute = function(attributeName, firstString, secondString) {
+        if (this.attr(attributeName) == firstString) {
+            this.attr(attributeName, secondString);
+        } else {
+            this.attr(attributeName, firstString);
+        }
+    }
+    $('body').on('click', '.expand_collapse_panel', function() {
+        var icon = $(this).find('i'),
+            panel = $(this).parents('.panel'),
+            panelBody = panel.find('.panel-body');
+        icon.toggleClass('fa-chevron-up fa-chevron-down');
+        $(this).toggleAttribute('title', 'Collapse', 'Expand');
+        panelBody.toggle('0.5', 'linear');
+        $(this).trigger('expand_collapse_panel', [$(this).parents('.panel')]);
+    });
+    $('body').on('click', '.fullscreen_panel', function() {
+        var icon = $(this).find('i'),
+            panel = $(this).parents('.panel'),
+            panelBody = panel.find('.panel-body');
+        icon.toggleClass('fa-expand fa-compress');
+        $(this).toggleAttribute('title', 'Fullscreen', 'Exit Fullscreen');
+        panel.toggleClass('panel-fullscreen');
+        panel.find('.expand_collapse_panel').toggle();
+        // Condition if user clicks on fullscree button and body is in collapse mode.
+        if (panel.hasClass('panel-fullscreen')) {
+            $('body').css("position", "fixed");
+            if (!panelBody.is(':visible')) {
+                panelBody.show();
+                panelBody.addClass('full-visible');
+            }
+            //first show body to get width and height for postion then trigger the event.
+            $(this).trigger('fullscreen_done', [$(this).parents('.panel')]);
+        } else if (panelBody.hasClass('full-visible')) {
+            $('body').removeAttr("style");
+            $(this).trigger('fullscreen_done', [$(this).parents('.panel')]);
+            //first trigger the event to getwidth and height for postion then hide body.
+            panelBody.hide();
+            panelBody.removeClass('full-visible');
+        } else {
+            $('body').removeAttr("style");
+            $(this).trigger('fullscreen_done', [$(this).parents('.panel')]);
+        }
+
+
+    });
     return Utils;
 });

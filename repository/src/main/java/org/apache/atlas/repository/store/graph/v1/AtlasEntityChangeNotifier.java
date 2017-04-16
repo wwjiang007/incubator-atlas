@@ -41,6 +41,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
@@ -51,26 +52,18 @@ public class AtlasEntityChangeNotifier {
 
     private final Set<EntityChangeListener> entityChangeListeners;
     private final AtlasInstanceConverter    instanceConverter;
-    private final FullTextMapper fullTextMapper;
 
     @Inject
-    private DeleteHandler deleteHandler;
+    private FullTextMapperV2 fullTextMapperV2;
 
     @Inject
     public AtlasEntityChangeNotifier(Set<EntityChangeListener> entityChangeListeners,
                                      AtlasInstanceConverter    instanceConverter) {
         this.entityChangeListeners = entityChangeListeners;
         this.instanceConverter     = instanceConverter;
-
-        // This is only needed for the Legacy FullTextMapper, once the V2 changes are in place this can be replaced/removed
-        AtlasGraphProvider graphProvider = new AtlasGraphProvider();
-        GraphToTypedInstanceMapper graphToTypedInstanceMapper = new GraphToTypedInstanceMapper(graphProvider);
-        TypedInstanceToGraphMapper typedInstanceToGraphMapper = new TypedInstanceToGraphMapper(graphToTypedInstanceMapper, deleteHandler);
-
-        this.fullTextMapper        = new FullTextMapper(typedInstanceToGraphMapper, graphToTypedInstanceMapper);
     }
 
-    public void onEntitiesMutated(EntityMutationResponse entityMutationResponse) throws AtlasBaseException {
+    public void onEntitiesMutated(EntityMutationResponse entityMutationResponse, boolean isImport) throws AtlasBaseException {
         if (CollectionUtils.isEmpty(entityChangeListeners) || instanceConverter == null) {
             return;
         }
@@ -80,35 +73,23 @@ public class AtlasEntityChangeNotifier {
         List<AtlasEntityHeader> partiallyUpdatedEntities = entityMutationResponse.getPartialUpdatedEntities();
         List<AtlasEntityHeader> deletedEntities          = entityMutationResponse.getDeletedEntities();
 
-        if (CollectionUtils.isNotEmpty(createdEntities)) {
-            List<ITypedReferenceableInstance> typedRefInst = toITypedReferenceable(createdEntities);
+        // complete full text mapping before calling toITypedReferenceable(), from notifyListners(), to
+        // include all vertex updates in the current graph-transaction
+        doFullTextMapping(createdEntities);
+        doFullTextMapping(updatedEntities);
+        doFullTextMapping(partiallyUpdatedEntities);
 
-            doFullTextMapping(createdEntities);
-            notifyListeners(typedRefInst, EntityOperation.CREATE);
-        }
-
-        if (CollectionUtils.isNotEmpty(updatedEntities)) {
-            List<ITypedReferenceableInstance> typedRefInst = toITypedReferenceable(updatedEntities);
-
-            doFullTextMapping(updatedEntities);
-            notifyListeners(typedRefInst, EntityOperation.UPDATE);
-        }
-
-        if (CollectionUtils.isNotEmpty(partiallyUpdatedEntities)) {
-            List<ITypedReferenceableInstance> typedRefInst = toITypedReferenceable(partiallyUpdatedEntities);
-
-            doFullTextMapping(partiallyUpdatedEntities);
-            notifyListeners(typedRefInst, EntityOperation.PARTIAL_UPDATE);
-        }
-
-        if (CollectionUtils.isNotEmpty(deletedEntities)) {
-            List<ITypedReferenceableInstance> typedRefInst = toITypedReferenceable(deletedEntities);
-
-            notifyListeners(typedRefInst, EntityOperation.DELETE);
-        }
+        notifyListeners(createdEntities, EntityOperation.CREATE, isImport);
+        notifyListeners(updatedEntities, EntityOperation.UPDATE, isImport);
+        notifyListeners(partiallyUpdatedEntities, EntityOperation.PARTIAL_UPDATE, isImport);
+        notifyListeners(deletedEntities, EntityOperation.DELETE, isImport);
     }
 
     public void onClassificationAddedToEntity(String entityId, List<AtlasClassification> classifications) throws AtlasBaseException {
+        // Only new classifications need to be used for a partial full text string which can be
+        // appended to the existing fullText
+        updateFullTextMapping(entityId, classifications);
+
         ITypedReferenceableInstance entity = toITypedReferenceable(entityId);
         List<ITypedStruct>          traits = toITypedStructs(classifications);
 
@@ -126,6 +107,9 @@ public class AtlasEntityChangeNotifier {
     }
 
     public void onClassificationDeletedFromEntity(String entityId, List<String> traitNames) throws AtlasBaseException {
+        // Since the entity has already been modified in the graph, we need to recursively remap the entity
+        doFullTextMapping(entityId);
+
         ITypedReferenceableInstance entity = toITypedReferenceable(entityId);
 
         if (entity == null || CollectionUtils.isEmpty(traitNames)) {
@@ -141,19 +125,25 @@ public class AtlasEntityChangeNotifier {
         }
     }
 
-    private void notifyListeners(List<ITypedReferenceableInstance> typedRefInsts, EntityOperation operation) throws AtlasBaseException {
+    private void notifyListeners(List<AtlasEntityHeader> entityHeaders, EntityOperation operation, boolean isImport) throws AtlasBaseException {
+        if (CollectionUtils.isEmpty(entityHeaders)) {
+            return;
+        }
+
+        List<ITypedReferenceableInstance> typedRefInsts = toITypedReferenceable(entityHeaders);
+
         for (EntityChangeListener listener : entityChangeListeners) {
             try {
                 switch (operation) {
                     case CREATE:
-                        listener.onEntitiesAdded(typedRefInsts);
+                        listener.onEntitiesAdded(typedRefInsts, isImport);
                         break;
                     case UPDATE:
                     case PARTIAL_UPDATE:
-                        listener.onEntitiesUpdated(typedRefInsts);
+                        listener.onEntitiesUpdated(typedRefInsts, isImport);
                         break;
                     case DELETE:
-                        listener.onEntitiesDeleted(typedRefInsts);
+                        listener.onEntitiesDeleted(typedRefInsts, isImport);
                         break;
                 }
             } catch (AtlasException e) {
@@ -199,6 +189,10 @@ public class AtlasEntityChangeNotifier {
     }
 
     private void doFullTextMapping(List<AtlasEntityHeader> atlasEntityHeaders) {
+        if (CollectionUtils.isEmpty(atlasEntityHeaders)) {
+            return;
+        }
+
         try {
             if(!AtlasRepositoryConfiguration.isFullTextSearchEnabled()) {
                 return;
@@ -208,19 +202,61 @@ public class AtlasEntityChangeNotifier {
         }
 
         for (AtlasEntityHeader atlasEntityHeader : atlasEntityHeaders) {
-            AtlasVertex atlasVertex = AtlasGraphUtilsV1.findByGuid(atlasEntityHeader.getGuid());
+            String      guid        = atlasEntityHeader.getGuid();
+            AtlasVertex atlasVertex = AtlasGraphUtilsV1.findByGuid(guid);
 
             if(atlasVertex == null) {
                 continue;
             }
 
             try {
-                String fullText = fullTextMapper.mapRecursive(atlasVertex, true);
+                String fullText = fullTextMapperV2.getIndexTextForEntity(guid);
 
                 GraphHelper.setProperty(atlasVertex, Constants.ENTITY_TEXT_PROPERTY_KEY, fullText);
-            } catch (AtlasException e) {
-                LOG.error("FullText mapping failed for Vertex[ guid = {} ]", atlasEntityHeader.getGuid(), e);
+            } catch (AtlasBaseException e) {
+                LOG.error("FullText mapping failed for Vertex[ guid = {} ]", guid, e);
             }
         }
+    }
+
+    private void updateFullTextMapping(String entityId, List<AtlasClassification> classifications) {
+        try {
+            if(!AtlasRepositoryConfiguration.isFullTextSearchEnabled()) {
+                return;
+            }
+        } catch (AtlasException e) {
+            LOG.warn("Unable to determine if FullText is disabled. Proceeding with FullText mapping");
+        }
+
+        if (StringUtils.isEmpty(entityId) || CollectionUtils.isEmpty(classifications)) {
+            return;
+        }
+
+        AtlasVertex atlasVertex = AtlasGraphUtilsV1.findByGuid(entityId);
+        if(atlasVertex == null) {
+            return;
+        }
+
+        if (atlasVertex == null) {
+            LOG.warn("updateFullTextMapping(): no entity exists with guid {}", entityId);
+            return;
+        }
+
+        try {
+            String classificationFullText = fullTextMapperV2.getIndexTextForClassifications(entityId, classifications);
+            String existingFullText = (String) GraphHelper.getProperty(atlasVertex, Constants.ENTITY_TEXT_PROPERTY_KEY);
+
+            String newFullText = existingFullText + " " + classificationFullText;
+            GraphHelper.setProperty(atlasVertex, Constants.ENTITY_TEXT_PROPERTY_KEY, newFullText);
+        } catch (AtlasBaseException e) {
+            LOG.error("FullText mapping failed for Vertex[ guid = {} ]", entityId, e);
+        }
+    }
+
+    private void doFullTextMapping(String guid) {
+        AtlasEntityHeader entityHeader = new AtlasEntityHeader();
+        entityHeader.setGuid(guid);
+
+        doFullTextMapping(Collections.singletonList(entityHeader));
     }
 }

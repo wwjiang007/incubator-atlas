@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Map;
 
+@Deprecated
 public class FullTextMapper {
 
     private static final Logger LOG = LoggerFactory.getLogger(FullTextMapper.class);
@@ -55,7 +56,7 @@ public class FullTextMapper {
         String guid = GraphHelper.getGuid(instanceVertex);
         ITypedReferenceableInstance typedReference;
         RequestContext context = RequestContext.get();
-        typedReference = context.getInstance(guid);
+        typedReference = context.getInstanceV1(guid);
         if (typedReference != null) {
 
             if (LOG.isDebugEnabled()) {

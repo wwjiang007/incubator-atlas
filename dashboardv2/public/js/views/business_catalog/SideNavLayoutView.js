@@ -66,7 +66,7 @@ define(['require',
             return events;
         },
         initialize: function(options) {
-            _.extend(this, _.pick(options, 'url', 'value', 'tag', 'selectFirst', 'collection', 'typeHeaders'));
+            _.extend(this, _.pick(options, 'url', 'value', 'tag', 'selectFirst', 'collection', 'typeHeaders', 'searchVent'));
             if (Globals.taxonomy) {
                 this.tabClass = "tab col-sm-4";
             } else {
@@ -106,18 +106,19 @@ define(['require',
             require(['views/search/SearchLayoutView'], function(SearchLayoutView) {
                 that.RSearchLayoutView.show(new SearchLayoutView({
                     value: that.value,
+                    searchVent: that.searchVent,
                     typeHeaders: that.typeHeaders
                 }));
             });
         },
         selectTab: function() {
-            if (Utils.getUrlState.isTagTab() || (Utils.getUrlState.isInitial() && !Globals.taxonomy)) {
+            if (Utils.getUrlState.isTagTab()) {
                 this.$('.tabs').find('li a[aria-controls="tab-tag"]').parents('li').addClass('active').siblings().removeClass('active');
                 this.$('.tab-content').find('div#tab-tag').addClass('active').siblings().removeClass('active');
-            } else if (Utils.getUrlState.isTaxonomyTab() || (Utils.getUrlState.isInitial() && Globals.taxonomy)) {
+            } else if (Utils.getUrlState.isTaxonomyTab()) {
                 this.$('.tabs').find('li a[aria-controls="tab-taxonomy"]').parents('li').addClass('active').siblings().removeClass('active');
                 this.$('.tab-content').find('div#tab-taxonomy').addClass('active').siblings().removeClass('active');
-            } else if (Utils.getUrlState.isSearchTab() || (Utils.getUrlState.isDetailPage())) {
+            } else if (Utils.getUrlState.isSearchTab() || (Utils.getUrlState.isDetailPage()) || Utils.getUrlState.isInitial()) {
                 this.$('.tabs').find('li a[aria-controls="tab-search"]').parents('li').addClass('active').siblings().removeClass('active');
                 this.$('.tab-content').find('div#tab-search').addClass('active').siblings().removeClass('active');
             }

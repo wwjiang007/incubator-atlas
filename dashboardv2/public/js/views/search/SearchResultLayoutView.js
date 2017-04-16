@@ -63,7 +63,8 @@ define(['require',
             },
             templateHelpers: function() {
                 return {
-                    entityCreate: Globals.entityCreate
+                    entityCreate: Globals.entityCreate,
+                    searchType: this.searchType
                 };
             },
             /** ui events hash */
@@ -122,7 +123,7 @@ define(['require',
              * @constructs
              */
             initialize: function(options) {
-                _.extend(this, _.pick(options, 'value', 'initialView', 'entityDefCollection', 'typeHeaders'));
+                _.extend(this, _.pick(options, 'value', 'initialView', 'entityDefCollection', 'typeHeaders', 'searchVent'));
                 var pagination = "";
                 this.entityModel = new VEntity();
                 this.searchCollection = new VSearchList();
@@ -147,6 +148,10 @@ define(['require',
                 this.bindEvents();
                 this.bradCrumbList = [];
                 this.arr = [];
+                this.searchType = 'Basic Search';
+                if (this.value && this.value.searchType && this.value.searchType == 'dsl') {
+                    this.searchType = 'Advanced Search';
+                }
             },
             bindEvents: function() {
                 var that = this;
@@ -160,27 +165,29 @@ define(['require',
                     this.searchCollection.find(function(item) {
                         if (item.get('isEnable')) {
                             var term = [];
-                            if (that.searchCollection.queryType == "DSL") {
-                                var obj = item.toJSON();
-                            } else {
-                                var obj = item.get('entity');
-                            }
+                            var obj = item.toJSON();
                             that.arr.push({
                                 id: obj.guid,
                                 model: obj
                             });
                         }
                     });
+
                     if (this.arr.length > 0) {
-                        this.$('.searchResult').find(".inputAssignTag.multiSelect").show();
-                        this.$('.searchResult').find(".inputAssignTag.multiSelectTag").show();
+                        if (Globals.taxonomy) {
+                            this.$('.multiSelectTerm').show();
+                        }
+                        this.$('.multiSelectTag').show();
                     } else {
-                        this.$('.searchResult').find(".inputAssignTag.multiSelect").hide();
-                        this.$('.searchResult').find(".inputAssignTag.multiSelectTag").hide();
+                        if (Globals.taxonomy) {
+                            this.$('.multiSelectTerm').hide();
+                        }
+                        this.$('.multiSelectTag').hide();
                     }
                 });
                 this.listenTo(this.searchCollection, "error", function(model, response) {
                     this.$('.fontLoader').hide();
+                    this.$('.tableOverlay').hide();
                     var responseJSON = response ? response.responseJSON : response;
                     if (response && responseJSON && (responseJSON.errorMessage || responseJSON.message || responseJSON.error)) {
                         Utils.notifyError({
@@ -192,6 +199,9 @@ define(['require',
                         });
                     }
                 }, this);
+                this.listenTo(this.searchVent, "search:refresh", function(model, response) {
+                    this.fetchCollection();
+                }, this);
             },
             onRender: function() {
                 if (!this.initialView) {
@@ -201,8 +211,8 @@ define(['require',
                         value = this.value;
                     } else {
                         value = {
-                            'query': '',
-                            'searchType': 'fulltext'
+                            'query': null,
+                            'searchType': 'basic'
                         };
                     }
                     this.fetchCollection(value);
@@ -223,80 +233,86 @@ define(['require',
             },
             fetchCollection: function(value) {
                 var that = this;
-                if (value && (value.query === undefined || value.query.trim() === "")) {
-                    return;
-                }
                 this.showLoader();
                 if (Globals.searchApiCallRef && Globals.searchApiCallRef.readyState === 1) {
                     Globals.searchApiCallRef.abort();
                 }
-                $.extend(this.searchCollection.queryParams, { limit: this.limit });
-                if (value) {
+
+                if (value && !value.paginationChange) {
+                    $.extend(this.searchCollection.queryParams, { limit: this.limit });
                     if (value.searchType) {
                         this.searchCollection.url = UrlLinks.searchApiUrl(value.searchType);
                         $.extend(this.searchCollection.queryParams, { limit: this.limit });
                         this.offset = 0;
                     }
-                    if (Utils.getUrlState.isTagTab()) {
-                        this.searchCollection.url = UrlLinks.searchApiUrl(Enums.searchUrlType.DSL);
-                    }
-                    _.extend(this.searchCollection.queryParams, { 'query': value.query.trim() });
+                    _.extend(this.searchCollection.queryParams, { 'query': (value.query ? value.query.trim() : null), 'typeName': value.type || null, 'classification': value.tag || null });
                 }
                 Globals.searchApiCallRef = this.searchCollection.fetch({
                     skipDefaultError: true,
                     success: function() {
-                        if (that.searchCollection.models.length < that.limit) {
-                            that.ui.nextData.attr('disabled', true);
-                        }
                         Globals.searchApiCallRef = undefined;
-                        if (that.offset === 0) {
-                            that.pageFrom = 1;
-                            that.pageTo = that.limit;
-                            if (that.searchCollection.length > 0) {
-                                that.ui.pageRecordText.html("Showing " + that.pageFrom + " - " + that.searchCollection.length);
+                        if (!(that.ui.pageRecordText instanceof jQuery)) {
+                            return;
+                        }
+                        if (value) {
+                            if (that.searchCollection.models.length < that.limit) {
+                                that.ui.nextData.attr('disabled', true);
                             }
-                        } else if (that.searchCollection.models.length && !that.previousClick) {
-                            //on next click, adding "1" for showing the another records..
-                            that.pageFrom = that.pageTo + 1;
-                            that.pageTo = that.pageTo + that.searchCollection.models.length;
-                            if (that.pageFrom && that.pageTo) {
+                            if (that.offset === 0) {
+                                that.pageFrom = 1;
+                                that.pageTo = that.limit;
+                                if (that.searchCollection.length > 0) {
+                                    that.ui.pageRecordText.html("Showing " + that.pageFrom + " - " + that.searchCollection.length);
+                                }
+                            } else if (that.searchCollection.models.length && !that.previousClick) {
+                                //on next click, adding "1" for showing the another records..
+                                that.pageFrom = that.pageTo + 1;
+                                that.pageTo = that.pageTo + that.searchCollection.models.length;
+                                if (that.pageFrom && that.pageTo) {
+                                    that.ui.pageRecordText.html("Showing " + that.pageFrom + " - " + that.pageTo);
+                                }
+                            } else if (that.previousClick) {
+                                that.pageTo = (that.pageTo - (that.pageTo - that.pageFrom)) - 1;
+                                //if limit is 0 then result is change to 1 because page count is showing from 1
+                                that.pageFrom = (that.pageFrom - that.limit === 0 ? 1 : that.pageFrom - that.limit);
                                 that.ui.pageRecordText.html("Showing " + that.pageFrom + " - " + that.pageTo);
                             }
-                        } else if (that.previousClick) {
-                            that.pageTo = (that.pageTo - (that.pageTo - that.pageFrom)) - 1;
-                            //if limit is 0 then result is change to 1 because page count is showing from 1
-                            that.pageFrom = (that.pageFrom - that.limit === 0 ? 1 : that.pageFrom - that.limit);
-                            that.ui.pageRecordText.html("Showing " + that.pageFrom + " - " + that.pageTo);
-                        }
-                        if (that.searchCollection.models.length === 0) {
-                            that.checkTableFetch();
-                            that.offset = that.offset - that.limit;
-                            if (that.firstFetch) {
-                                that.renderTableLayoutView();
+                            if (that.offset < that.limit) {
+                                that.ui.previousData.attr('disabled', true);
+                            }
+                            if (that.searchCollection.models.length === 0) {
+                                that.checkTableFetch();
+                                that.offset = that.offset - that.limit;
+                                if (that.firstFetch) {
+                                    that.renderTableLayoutView();
+                                }
                             }
                         }
                         if (that.firstFetch) {
                             that.firstFetch = false;
                         }
-                        if (that.offset < that.limit) {
-                            that.ui.previousData.attr('disabled', true);
-                        }
+
                         // checking length for not rendering the table
                         if (that.searchCollection.models.length) {
                             that.renderTableLayoutView();
                         }
-                        var resultData = 'Results for <b>' + _.escape(that.searchCollection.queryParams.query) + '</b>';
-                        var multiAssignDataTag = '<a href="javascript:void(0)" class="inputAssignTag multiSelectTag assignTag" style="display:none" data-id="addAssignTag"><i class="fa fa-plus"></i>' + " " + 'Assign Tag</a>';
-                        var resultText = that.searchCollection.queryParams.query;
-                        var multiAssignDataTerm = "",
-                            createEntityTag = "";
-                        if (Globals.taxonomy) {
-                            multiAssignDataTerm = '<a href="javascript:void(0)" class="inputAssignTag multiSelect" style="display:none" data-id="addTerm"><i class="fa fa-folder-o"></i>' + " " + 'Assign Term</a>';
+                        if (value) {
+                            var resultArr = [];
+                            if (that.searchCollection.queryParams.typeName) {
+                                resultArr.push(that.searchCollection.queryParams.typeName)
+                            }
+                            if (that.searchCollection.queryParams.classification) {
+                                resultArr.push(that.searchCollection.queryParams.classification)
+                            }
+                            if (that.searchCollection.queryParams.query) {
+                                resultArr.push(that.searchCollection.queryParams.query)
+                            }
+                            var searchString = 'Results for <b>' + _.escape(resultArr.join(that.searchType == 'Advanced Search' ? " " : " & ")) + '</b>';
+                            if (Globals.entityCreate && Globals.entityTypeConfList && Utils.getUrlState.isSearchTab()) {
+                                searchString += "<p>If you do not find the entity in search result below then you can" + '<a href="javascript:void(0)" data-id="createEntity"> create new entity</a></p>';
+                            }
+                            that.$('.searchResult').html(searchString);
                         }
-                        if (Globals.entityCreate && (resultText.indexOf("\`") != 0) && Globals.entityTypeConfList) {
-                            createEntityTag = "<p>If you do not find the entity in search result below then you can" + '<a href="javascript:void(0)" data-id="createEntity"> create new entity</a></p>';
-                        }
-                        that.$('.searchResult').html(resultData + multiAssignDataTag + multiAssignDataTerm + createEntityTag);
                     },
                     silent: true,
                     reset: true
@@ -311,8 +327,9 @@ define(['require',
                         columns: columns
                     })));
                     that.ui.paginationDiv.show();
-                    that.$('.searchResult').find(".inputAssignTag.multiSelect").hide();
+                    that.$(".ellipsis .inputAssignTag").hide();
                     that.renderBreadcrumb();
+                    that.checkTableFetch();
                 });
             },
             renderBreadcrumb: function() {
@@ -326,7 +343,6 @@ define(['require',
             },
             checkTableFetch: function() {
                 if (this.asyncFetchCounter <= 0) {
-                    this.$('div[data-id="r_tableSpinner"]').removeClass('show');
                     this.hideLoader();
                 }
             },
@@ -349,14 +365,9 @@ define(['require',
                     className: "searchTableName",
                     formatter: _.extend({}, Backgrid.CellFormatter.prototype, {
                         fromRaw: function(rawValue, model) {
-                            if (that.searchCollection.queryType == "DSL") {
-                                var obj = model.toJSON();
-                            } else {
-                                var obj = model.get('entity');
-                            }
-                            var nameHtml = "";
-
-                            var name = Utils.getName(obj);
+                            var obj = model.toJSON(),
+                                nameHtml = "",
+                                name = Utils.getName(obj);
                             if (obj.guid) {
                                 nameHtml = '<a title="' + name + '" href="#!/detailPage/' + obj.guid + '">' + name + '</a>';
                             } else {
@@ -388,11 +399,7 @@ define(['require',
                     sortable: false,
                     formatter: _.extend({}, Backgrid.CellFormatter.prototype, {
                         fromRaw: function(rawValue, model) {
-                            if (that.searchCollection.queryType == "DSL") {
-                                var obj = model.toJSON();
-                            } else {
-                                var obj = model.get('entity');
-                            }
+                            var obj = model.toJSON();
                             if (obj && obj.attributes && obj.attributes.description) {
                                 return obj.attributes.description;
                             }
@@ -406,11 +413,7 @@ define(['require',
                     sortable: false,
                     formatter: _.extend({}, Backgrid.CellFormatter.prototype, {
                         fromRaw: function(rawValue, model) {
-                            if (that.searchCollection.queryType == "DSL") {
-                                var obj = model.toJSON();
-                            } else {
-                                var obj = model.get('entity');
-                            }
+                            var obj = model.toJSON();
                             if (obj && obj.typeName) {
                                 return '<a title="Search ' + obj.typeName + '" href="#!/search/searchResult?query=' + obj.typeName + ' &searchType=dsl&dslChecked=true">' + obj.typeName + '</a>';
                             }
@@ -424,11 +427,7 @@ define(['require',
                     sortable: false,
                     formatter: _.extend({}, Backgrid.CellFormatter.prototype, {
                         fromRaw: function(rawValue, model) {
-                            if (that.searchCollection.queryType == "DSL") {
-                                var obj = model.toJSON();
-                            } else {
-                                var obj = model.get('entity');
-                            }
+                            var obj = model.toJSON();
                             if (obj && obj.attributes && obj.attributes.owner) {
                                 return obj.attributes.owner;
                             }
@@ -444,11 +443,7 @@ define(['require',
                     className: 'searchTag',
                     formatter: _.extend({}, Backgrid.CellFormatter.prototype, {
                         fromRaw: function(rawValue, model) {
-                            if (that.searchCollection.queryType == "DSL") {
-                                var obj = model.toJSON();
-                            } else {
-                                var obj = model.get('entity');
-                            }
+                            var obj = model.toJSON();
                             if (obj.status && Enums.entityStateReadOnly[obj.status]) {
                                 return '<div class="readOnly">' + CommonViewFunction.tagForTable(obj); + '</div>';
                             } else {
@@ -468,11 +463,7 @@ define(['require',
                         className: 'searchTerm',
                         formatter: _.extend({}, Backgrid.CellFormatter.prototype, {
                             fromRaw: function(rawValue, model) {
-                                if (that.searchCollection.queryType == "DSL") {
-                                    var obj = model.toJSON();
-                                } else {
-                                    var obj = model.get('entity');
-                                }
+                                var obj = model.toJSON();
                                 var returnObject = CommonViewFunction.termTableBreadcrumbMaker(obj);
                                 if (returnObject.object) {
                                     that.bradCrumbList.push(returnObject.object);
@@ -486,7 +477,6 @@ define(['require',
                         })
                     };
                 }
-                that.checkTableFetch();
                 return this.searchCollection.constructor.getTableCols(col, this.searchCollection);
             },
             addTagModalView: function(guid, multiple) {
@@ -508,22 +498,14 @@ define(['require',
             getTagList: function(guid, multiple) {
                 var that = this;
                 if (!multiple || multiple.length === 0) {
-                    var modal = this.searchCollection.find(function(item) {
-                        if (that.searchCollection.queryType == "DSL") {
-                            var obj = item.toJSON();
-                        } else {
-                            var obj = item.get('entity');
-                        }
+                    var model = this.searchCollection.find(function(item) {
+                        var obj = item.toJSON();
                         if (obj.guid === guid) {
                             return true;
                         }
                     });
-                    if (modal) {
-                        if (that.searchCollection.queryType == "DSL") {
-                            var obj = modal.toJSON();
-                        } else {
-                            var obj = modal.get('entity');
-                        }
+                    if (model) {
+                        var obj = model.toJSON();
                     } else {
                         return [];
                     }
@@ -535,13 +517,12 @@ define(['require',
             },
             showLoader: function() {
                 this.$('.fontLoader').show();
-                this.$('.searchTable').hide();
-                this.$('.searchResult').hide();
+                this.$('.tableOverlay').show();
             },
             hideLoader: function() {
                 this.$('.fontLoader').hide();
-                this.$('.searchTable').show();
-                this.$('.searchResult').show();
+                this.$('.ellipsis,.labelShowRecord').show(); // only for first time
+                this.$('.tableOverlay').hide();
             },
             checkedValue: function(e) {
                 var guid = "",
@@ -616,6 +597,8 @@ define(['require',
                     'tagName': tagName,
                     'guid': guid,
                     'tagOrTerm': tagOrTerm,
+                    showLoader: that.showLoader.bind(that),
+                    hideLoader: that.hideLoader.bind(that),
                     callback: function() {
                         that.fetchCollection();
                     }
@@ -629,7 +612,7 @@ define(['require',
                     offset: that.offset
                 });
                 this.previousClick = false;
-                this.fetchCollection();
+                this.fetchCollection({ paginationChange: true });
             },
             onClickpreviousData: function() {
                 var that = this;
@@ -639,7 +622,7 @@ define(['require',
                     offset: that.offset
                 });
                 this.previousClick = true;
-                this.fetchCollection();
+                this.fetchCollection({ paginationChange: true });
             },
 
             onClickEditEntity: function(e) {

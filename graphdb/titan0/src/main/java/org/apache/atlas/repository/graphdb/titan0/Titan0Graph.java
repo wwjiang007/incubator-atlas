@@ -35,6 +35,8 @@ import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
 
+import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.groovy.GroovyExpression;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
@@ -63,12 +65,15 @@ import com.tinkerpop.blueprints.Element;
 import com.tinkerpop.blueprints.Vertex;
 import com.tinkerpop.blueprints.util.io.graphson.GraphSONWriter;
 import com.tinkerpop.pipes.util.structures.Row;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 /**
  * Titan 0.5.4 implementation of AtlasGraph.
  */
 public class Titan0Graph implements AtlasGraph<Titan0Vertex, Titan0Edge> {
+    private static final Logger LOG = LoggerFactory.getLogger(Titan0Graph.class);
 
     private final Set<String> multiProperties;
 
@@ -261,7 +266,7 @@ public class Titan0Graph implements AtlasGraph<Titan0Vertex, Titan0Edge> {
     }
 
     @Override
-    public Object executeGremlinScript(String query, boolean isPath) throws ScriptException {
+    public Object executeGremlinScript(String query, boolean isPath) throws AtlasBaseException {
 
         Object result = executeGremlinScript(query);
         return convertGremlinScriptResult(isPath, result);
@@ -282,25 +287,60 @@ public class Titan0Graph implements AtlasGraph<Titan0Vertex, Titan0Edge> {
     }
 
     @Override
-    public Object executeGremlinScript(ScriptEngine scriptEngine, Bindings bindings, String query, boolean isPath) throws ScriptException {
-        if(!bindings.containsKey("g")) {
-            bindings.put("g", getGraph());
+    public ScriptEngine getGremlinScriptEngine() throws AtlasBaseException {
+        ScriptEngineManager manager = new ScriptEngineManager();
+        ScriptEngine        engine  = manager.getEngineByName("gremlin-groovy");
+
+        if (engine == null) {
+            throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_GREMLIN_SCRIPT_ENGINE, "gremlin-groovy");
         }
 
-        Object result = scriptEngine.eval(query, bindings);
-        return convertGremlinScriptResult(isPath, result);
-
-    }
-
-    private Object executeGremlinScript(String gremlinQuery) throws ScriptException {
-
-        ScriptEngineManager manager = new ScriptEngineManager();
-        ScriptEngine engine = manager.getEngineByName("gremlin-groovy");
-        Bindings bindings = engine.createBindings();
-        bindings.put("g", getGraph());
         //Do not cache script compilations due to memory implications
         engine.getContext().setAttribute("#jsr223.groovy.engine.keep.globals", "phantom", ScriptContext.ENGINE_SCOPE);
-        Object result = engine.eval(gremlinQuery, bindings);
+
+        return engine;
+    }
+
+    @Override
+    public void releaseGremlinScriptEngine(ScriptEngine scriptEngine) {
+        // no action needed
+    }
+
+    @Override
+    public Object executeGremlinScript(ScriptEngine scriptEngine, Map<? extends  String, ? extends  Object> userBindings, String query, boolean isPath) throws ScriptException {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("executeGremlinScript(query={}, userBindings={})", query, userBindings);
+        }
+
+        Bindings bindings = scriptEngine.createBindings();
+
+        if (userBindings != null) {
+            bindings.putAll(userBindings);
+        }
+
+        bindings.put("g", getGraph());
+
+        Object result = scriptEngine.eval(query, bindings);
+
+        return convertGremlinScriptResult(isPath, result);
+    }
+
+    private Object executeGremlinScript(String gremlinQuery) throws AtlasBaseException {
+        Object       result = null;
+        ScriptEngine engine = getGremlinScriptEngine();
+
+        try {
+            Bindings bindings = engine.createBindings();
+
+            bindings.put("g", getGraph());
+
+            result = engine.eval(gremlinQuery, bindings);
+        } catch (ScriptException e) {
+            throw new AtlasBaseException(AtlasErrorCode.GREMLIN_SCRIPT_EXECUTION_FAILED, gremlinQuery);
+        } finally {
+            releaseGremlinScriptEngine(engine);
+        }
+
         return result;
     }
 

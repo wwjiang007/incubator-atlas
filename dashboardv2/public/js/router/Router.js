@@ -29,7 +29,7 @@ define([
     var AppRouter = Backbone.Router.extend({
         routes: {
             // Define some URL routes
-            '': 'commonAction',
+            '': 'defaultAction',
             '!/': 'tagAttributePageLoad',
             '!/tag/tagAttribute/(*name)': 'tagAttributePageLoad',
             '!/taxonomy/detailCatalog/(*url)': 'detailCatalog',
@@ -47,6 +47,7 @@ define([
             this.bindCommonEvents();
             this.listenTo(this, 'route', this.postRouteExecute, this);
             this.tagCollection = new VTagList();
+            this.searchVent = new Backbone.Wreqr.EventAggregator();
         },
         bindCommonEvents: function() {
             var that = this;
@@ -233,6 +234,7 @@ define([
                     App.rSideNav.show(new SideNavLayoutView({
                         'value': paramObj,
                         'collection': that.tagCollection,
+                        'searchVent': that.searchVent,
                         'typeHeaders': that.typeHeaders
                     }));
                 } else {
@@ -243,31 +245,21 @@ define([
                     'value': paramObj,
                     'entityDefCollection': that.entityDefCollection,
                     'typeHeaders': that.typeHeaders,
-                    'initialView': paramObj.query.trim().length === 0
+                    'searchVent': that.searchVent,
+                    'initialView': (paramObj.type || (paramObj.dslChecked == "true" ? "" : paramObj.tag) || (paramObj.query ? paramObj.query.trim() : "")).length === 0
                 }));
             });
         },
         defaultAction: function(actions) {
             // We have no matching route, lets just log what the URL was
-            if (Globals.taxonomy) {
-                Utils.setUrl({
-                    url: '#!/taxonomy',
-                    mergeBrowserUrl: false,
-                    updateTabState: function() {
-                        return { taxonomyUrl: this.url, stateChanged: false };
-                    },
-                    trigger: true
-                });
-            } else {
-                Utils.setUrl({
-                    url: '#!/tag',
-                    mergeBrowserUrl: false,
-                    updateTabState: function() {
-                        return { tagUrl: this.url, stateChanged: false };
-                    },
-                    trigger: true
-                });
-            }
+            Utils.setUrl({
+                url: '#!/search',
+                mergeBrowserUrl: false,
+                updateTabState: function() {
+                    return { searchUrl: this.url, stateChanged: false };
+                },
+                trigger: true
+            });
 
             console.log('No route:', actions);
         }

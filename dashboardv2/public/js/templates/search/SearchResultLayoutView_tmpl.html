@@ -14,13 +14,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
 -->
-<div class="row">
+<div class="">
+    <div class="tableOverlay"></div>
+    <!-- Not for table Loader its only for initial loading -->
     <div class="fontLoader">
         <i class="fa fa-refresh fa-spin-custom"></i>
     </div>
-    <div class="ellipsis"><span class="searchResult" style=" font-size: 16px;"></span></div>
+    <div class="ellipsis" style="display: none;"><span class="searchResult" style=" font-size: 16px;"></span>
+        <a href="javascript:void(0)" class="inputAssignTag multiSelectTerm btnAssign" style="display:none" data-id="addTerm"><i class="fa fa-folder-o"></i> Assign Term</a>
+        <a href="javascript:void(0)" class="inputAssignTag multiSelectTag assignTag btnAssign" style="display:none" data-id="addAssignTag"><i class="fa fa-plus"></i> Assign Tag</a>
+    </div>
     <div class="searchTable">
-        <span class="labelShowRecord pull-left" data-id="pageRecordText"></span>
+        <span style="display: none;" class="labelShowRecord pull-left" data-id="pageRecordText"></span>
         <div data-id="paginationDiv" style="display:none">
             <ul class="pager pull-right">
                 <li>
@@ -34,9 +39,9 @@
         <div id="r_searchResultTableLayoutView">
             {{#if entityCreate}}
             <div class="entityLink" style="display:none">
-                <h1><b>Atlas Search</b></h1>
+                <h1><b>{{searchType}}</b></h1>
                 <p class="entityLink">Search Atlas for existing entities or
-                    <a href="javascript:void(0)" data-id='createEntity'> create new entity </a><i class="fa fa-question-circle" aria-hidden="true"></i>
+                    <a href="javascript:void(0)" data-id='createEntity'> create new entity </a>
                 </p>
             </div>
             {{/if}}

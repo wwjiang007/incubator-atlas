@@ -31,6 +31,8 @@ import org.apache.atlas.model.typedef.AtlasClassificationDef;
 import org.apache.atlas.model.typedef.AtlasEntityDef;
 import org.apache.atlas.model.typedef.AtlasEnumDef;
 import org.apache.atlas.model.typedef.AtlasStructDef;
+import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
+import org.apache.atlas.model.typedef.AtlasStructDef.AtlasConstraintDef;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.apache.atlas.repository.store.bootstrap.AtlasTypeDefStoreInitializer;
 import org.apache.atlas.repository.util.FilterUtil;
@@ -46,14 +48,13 @@ import org.apache.atlas.type.AtlasTypeUtil;
 import org.apache.atlas.util.AtlasRepositoryConfiguration;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.Predicate;
-import org.apache.commons.collections.Transformer;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -92,10 +93,14 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore, Activ
         try {
             ttr = typeRegistry.lockTypeRegistryForUpdate(typeUpdateLockMaxWaitTimeSeconds);
 
+            ttr.clear();
+
             AtlasTypesDef typesDef = new AtlasTypesDef(getEnumDefStore(ttr).getAll(),
                     getStructDefStore(ttr).getAll(),
                     getClassificationDefStore(ttr).getAll(),
                     getEntityDefStore(ttr).getAll());
+
+            rectifyTypeErrorsIfAny(typesDef);
 
             ttr.addTypes(typesDef);
 
@@ -292,84 +297,11 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore, Activ
                     CollectionUtils.size(typesDef.getEntityDefs()));
         }
 
-        AtlasTypesDef ret = new AtlasTypesDef();
-
         AtlasTransientTypeRegistry ttr = lockTypeRegistryAndReleasePostCommit();
 
         ttr.addTypes(typesDef);
 
-        AtlasEnumDefStore           enumDefStore     = getEnumDefStore(ttr);
-        AtlasStructDefStore         structDefStore   = getStructDefStore(ttr);
-        AtlasClassificationDefStore classifiDefStore = getClassificationDefStore(ttr);
-        AtlasEntityDefStore         entityDefStore   = getEntityDefStore(ttr);
-
-        List<Object> preCreateStructDefs   = new ArrayList<>();
-        List<Object> preCreateClassifiDefs = new ArrayList<>();
-        List<Object> preCreateEntityDefs   = new ArrayList<>();
-
-        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
-            for (AtlasEnumDef enumDef : typesDef.getEnumDefs()) {
-                AtlasEnumDef createdDef = enumDefStore.create(enumDef);
-
-                ttr.updateGuid(createdDef.getName(), createdDef.getGuid());
-
-                ret.getEnumDefs().add(createdDef);
-            }
-        }
-
-        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
-            for (AtlasStructDef structDef : typesDef.getStructDefs()) {
-                preCreateStructDefs.add(structDefStore.preCreate(structDef));
-            }
-        }
-
-        if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
-            for (AtlasClassificationDef classifiDef : typesDef.getClassificationDefs()) {
-                preCreateClassifiDefs.add(classifiDefStore.preCreate(classifiDef));
-            }
-        }
-
-        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
-            for (AtlasEntityDef entityDef : typesDef.getEntityDefs()) {
-                preCreateEntityDefs.add(entityDefStore.preCreate(entityDef));
-            }
-        }
-
-        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
-            int i = 0;
-            for (AtlasStructDef structDef : typesDef.getStructDefs()) {
-                AtlasStructDef createdDef = structDefStore.create(structDef, preCreateStructDefs.get(i));
-
-                ttr.updateGuid(createdDef.getName(), createdDef.getGuid());
-
-                ret.getStructDefs().add(createdDef);
-                i++;
-            }
-        }
-
-        if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
-            int i = 0;
-            for (AtlasClassificationDef classifiDef : typesDef.getClassificationDefs()) {
-                AtlasClassificationDef createdDef = classifiDefStore.create(classifiDef, preCreateClassifiDefs.get(i));
-
-                ttr.updateGuid(createdDef.getName(), createdDef.getGuid());
-
-                ret.getClassificationDefs().add(createdDef);
-                i++;
-            }
-        }
-
-        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
-            int i = 0;
-            for (AtlasEntityDef entityDef : typesDef.getEntityDefs()) {
-                AtlasEntityDef createdDef = entityDefStore.create(entityDef, preCreateEntityDefs.get(i));
-
-                ttr.updateGuid(createdDef.getName(), createdDef.getGuid());
-
-                ret.getEntityDefs().add(createdDef);
-                i++;
-            }
-        }
+        AtlasTypesDef ret = addToGraphStore(typesDef, ttr);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== AtlasTypeDefGraphStore.createTypesDef(enums={}, structs={}, classfications={}, entities={})",
@@ -377,6 +309,58 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore, Activ
                     CollectionUtils.size(typesDef.getStructDefs()),
                     CollectionUtils.size(typesDef.getClassificationDefs()),
                     CollectionUtils.size(typesDef.getEntityDefs()));
+        }
+
+        return ret;
+    }
+
+    @Override
+    @GraphTransaction
+    public AtlasTypesDef createUpdateTypesDef(AtlasTypesDef typesToCreate, AtlasTypesDef typesToUpdate) throws AtlasBaseException {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> AtlasTypeDefGraphStore.createUpdateTypesDef({}, {})", typesToCreate, typesToUpdate);
+        }
+
+        AtlasTransientTypeRegistry ttr = lockTypeRegistryAndReleasePostCommit();
+
+        if (!typesToUpdate.isEmpty()) {
+            ttr.updateTypesWithNoRefResolve(typesToUpdate);
+        }
+
+        ttr.addTypes(typesToCreate);
+
+        AtlasTypesDef ret = addToGraphStore(typesToCreate, ttr);
+
+        if (!typesToUpdate.isEmpty()) {
+            AtlasTypesDef updatedTypes = updateGraphStore(typesToUpdate, ttr);
+
+            if (CollectionUtils.isNotEmpty(updatedTypes.getEnumDefs())) {
+                for (AtlasEnumDef enumDef : updatedTypes.getEnumDefs()) {
+                    ret.getEnumDefs().add(enumDef);
+                }
+            }
+
+            if (CollectionUtils.isNotEmpty(updatedTypes.getStructDefs())) {
+                for (AtlasStructDef structDef : updatedTypes.getStructDefs()) {
+                    ret.getStructDefs().add(structDef);
+                }
+            }
+
+            if (CollectionUtils.isNotEmpty(updatedTypes.getClassificationDefs())) {
+                for (AtlasClassificationDef classificationDef : updatedTypes.getClassificationDefs()) {
+                    ret.getClassificationDefs().add(classificationDef);
+                }
+            }
+
+            if (CollectionUtils.isNotEmpty(updatedTypes.getEntityDefs())) {
+                for (AtlasEntityDef entityDef : updatedTypes.getEntityDefs()) {
+                    ret.getEntityDefs().add(entityDef);
+                }
+            }
+        }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("<== AtlasTypeDefGraphStore.createUpdateTypesDef({}, {}): {}", typesToCreate, typesToUpdate, ret);
         }
 
         return ret;
@@ -393,40 +377,11 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore, Activ
                     CollectionUtils.size(typesDef.getEntityDefs()));
         }
 
-        AtlasTypesDef ret = new AtlasTypesDef();
-
         AtlasTransientTypeRegistry ttr = lockTypeRegistryAndReleasePostCommit();
 
         ttr.updateTypes(typesDef);
 
-        AtlasEnumDefStore           enumDefStore     = getEnumDefStore(ttr);
-        AtlasStructDefStore         structDefStore   = getStructDefStore(ttr);
-        AtlasClassificationDefStore classifiDefStore = getClassificationDefStore(ttr);
-        AtlasEntityDefStore         entityDefStore   = getEntityDefStore(ttr);
-
-        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
-            for (AtlasEnumDef enumDef : typesDef.getEnumDefs()) {
-                ret.getEnumDefs().add(enumDefStore.update(enumDef));
-            }
-        }
-
-        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
-            for (AtlasStructDef structDef : typesDef.getStructDefs()) {
-                ret.getStructDefs().add(structDefStore.update(structDef));
-            }
-        }
-
-        if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
-            for (AtlasClassificationDef classifiDef : typesDef.getClassificationDefs()) {
-                ret.getClassificationDefs().add(classifiDefStore.update(classifiDef));
-            }
-        }
-
-        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
-            for (AtlasEntityDef entityDef : typesDef.getEntityDefs()) {
-                ret.getEntityDefs().add(entityDefStore.update(entityDef));
-            }
-        }
+        AtlasTypesDef ret = updateGraphStore(typesDef, ttr);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== AtlasTypeDefGraphStore.updateTypesDef(enums={}, structs={}, classfications={}, entities={})",
@@ -537,6 +492,9 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore, Activ
                 }
             }
         }
+
+        // Remove all from
+        ttr.removeTypesDef(typesDef);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== AtlasTypeDefGraphStore.deleteTypesDef(enums={}, structs={}, classfications={}, entities={})",
@@ -654,6 +612,204 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore, Activ
         new TypeRegistryUpdateHook(ttr);
 
         return ttr;
+    }
+
+    private void rectifyTypeErrorsIfAny(AtlasTypesDef typesDef) {
+        final Set<String> entityNames = new HashSet<>();
+
+        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
+            for (AtlasEntityDef entityDef : typesDef.getEntityDefs()) {
+                entityNames.add(entityDef.getName());
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
+            for (AtlasStructDef structDef : typesDef.getStructDefs()) {
+                rectifyAttributesIfNeeded(entityNames, structDef);
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
+            for (AtlasClassificationDef classificationDef : typesDef.getClassificationDefs()) {
+                rectifyAttributesIfNeeded(entityNames, classificationDef);
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
+            for (AtlasEntityDef entityDef : typesDef.getEntityDefs()) {
+                rectifyAttributesIfNeeded(entityNames, entityDef);
+            }
+        }
+    }
+
+    private void rectifyAttributesIfNeeded(final Set<String> entityNames, AtlasStructDef structDef) {
+        List<AtlasAttributeDef> attributeDefs = structDef.getAttributeDefs();
+
+        if (CollectionUtils.isNotEmpty(attributeDefs)) {
+            for (AtlasAttributeDef attributeDef : attributeDefs) {
+                if (!hasOwnedReferenceConstraint(attributeDef.getConstraints())) {
+                    continue;
+                }
+
+                Set<String> referencedTypeNames = AtlasTypeUtil.getReferencedTypeNames(attributeDef.getTypeName());
+
+                boolean valid = false;
+
+                for (String referencedTypeName : referencedTypeNames) {
+                    if (entityNames.contains(referencedTypeName)) {
+                        valid = true;
+                        break;
+                    }
+                }
+
+                if (!valid) {
+                    rectifyOwnedReferenceError(structDef, attributeDef);
+                }
+            }
+        }
+    }
+
+    private boolean hasOwnedReferenceConstraint(List<AtlasConstraintDef> constraints) {
+        if (CollectionUtils.isNotEmpty(constraints)) {
+            for (AtlasConstraintDef constraint : constraints) {
+                if (constraint.isConstraintType(AtlasConstraintDef.CONSTRAINT_TYPE_OWNED_REF)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void rectifyOwnedReferenceError(AtlasStructDef structDef, AtlasAttributeDef attributeDef) {
+        List<AtlasConstraintDef> constraints = attributeDef.getConstraints();
+
+        if (CollectionUtils.isNotEmpty(constraints)) {
+            for (int i = 0; i < constraints.size(); i++) {
+                AtlasConstraintDef constraint = constraints.get(i);
+
+                if (constraint.isConstraintType(AtlasConstraintDef.CONSTRAINT_TYPE_OWNED_REF)) {
+                    LOG.warn("Invalid constraint ownedRef for attribute {}.{}", structDef.getName(), attributeDef.getName());
+
+                    constraints.remove(i);
+                    i--;
+                }
+            }
+        }
+    }
+
+    private AtlasTypesDef addToGraphStore(AtlasTypesDef typesDef, AtlasTransientTypeRegistry ttr) throws AtlasBaseException {
+        AtlasTypesDef ret = new AtlasTypesDef();
+
+        AtlasEnumDefStore           enumDefStore     = getEnumDefStore(ttr);
+        AtlasStructDefStore         structDefStore   = getStructDefStore(ttr);
+        AtlasClassificationDefStore classifiDefStore = getClassificationDefStore(ttr);
+        AtlasEntityDefStore         entityDefStore   = getEntityDefStore(ttr);
+
+        List<Object> preCreateStructDefs   = new ArrayList<>();
+        List<Object> preCreateClassifiDefs = new ArrayList<>();
+        List<Object> preCreateEntityDefs   = new ArrayList<>();
+
+        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
+            for (AtlasEnumDef enumDef : typesDef.getEnumDefs()) {
+                AtlasEnumDef createdDef = enumDefStore.create(enumDef);
+
+                ttr.updateGuid(createdDef.getName(), createdDef.getGuid());
+
+                ret.getEnumDefs().add(createdDef);
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
+            for (AtlasStructDef structDef : typesDef.getStructDefs()) {
+                preCreateStructDefs.add(structDefStore.preCreate(structDef));
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
+            for (AtlasClassificationDef classifiDef : typesDef.getClassificationDefs()) {
+                preCreateClassifiDefs.add(classifiDefStore.preCreate(classifiDef));
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
+            for (AtlasEntityDef entityDef : typesDef.getEntityDefs()) {
+                preCreateEntityDefs.add(entityDefStore.preCreate(entityDef));
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
+            int i = 0;
+            for (AtlasStructDef structDef : typesDef.getStructDefs()) {
+                AtlasStructDef createdDef = structDefStore.create(structDef, preCreateStructDefs.get(i));
+
+                ttr.updateGuid(createdDef.getName(), createdDef.getGuid());
+
+                ret.getStructDefs().add(createdDef);
+                i++;
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
+            int i = 0;
+            for (AtlasClassificationDef classifiDef : typesDef.getClassificationDefs()) {
+                AtlasClassificationDef createdDef = classifiDefStore.create(classifiDef, preCreateClassifiDefs.get(i));
+
+                ttr.updateGuid(createdDef.getName(), createdDef.getGuid());
+
+                ret.getClassificationDefs().add(createdDef);
+                i++;
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
+            int i = 0;
+            for (AtlasEntityDef entityDef : typesDef.getEntityDefs()) {
+                AtlasEntityDef createdDef = entityDefStore.create(entityDef, preCreateEntityDefs.get(i));
+
+                ttr.updateGuid(createdDef.getName(), createdDef.getGuid());
+
+                ret.getEntityDefs().add(createdDef);
+                i++;
+            }
+        }
+
+        return ret;
+    }
+
+    private AtlasTypesDef updateGraphStore(AtlasTypesDef typesDef, AtlasTransientTypeRegistry ttr) throws AtlasBaseException {
+        AtlasTypesDef ret = new AtlasTypesDef();
+
+        AtlasEnumDefStore           enumDefStore     = getEnumDefStore(ttr);
+        AtlasStructDefStore         structDefStore   = getStructDefStore(ttr);
+        AtlasClassificationDefStore classifiDefStore = getClassificationDefStore(ttr);
+        AtlasEntityDefStore         entityDefStore   = getEntityDefStore(ttr);
+
+        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
+            for (AtlasEnumDef enumDef : typesDef.getEnumDefs()) {
+                ret.getEnumDefs().add(enumDefStore.update(enumDef));
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
+            for (AtlasStructDef structDef : typesDef.getStructDefs()) {
+                ret.getStructDefs().add(structDefStore.update(structDef));
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
+            for (AtlasClassificationDef classifiDef : typesDef.getClassificationDefs()) {
+                ret.getClassificationDefs().add(classifiDefStore.update(classifiDef));
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
+            for (AtlasEntityDef entityDef : typesDef.getEntityDefs()) {
+                ret.getEntityDefs().add(entityDefStore.update(entityDef));
+            }
+        }
+
+        return ret;
     }
 
     private class TypeRegistryUpdateHook extends GraphTransactionInterceptor.PostTransactionHook {

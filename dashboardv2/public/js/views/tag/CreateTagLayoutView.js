@@ -21,8 +21,10 @@ define(['require',
     'hbs!tmpl/tag/createTagLayoutView_tmpl',
     'utils/Utils',
     'views/tag/TagAttributeItemView',
+    'collection/VTagList',
+    'utils/UrlLinks',
     'platform'
-], function(require, Backbone, CreateTagLayoutViewTmpl, Utils, TagAttributeItemView, platform) {
+], function(require, Backbone, CreateTagLayoutViewTmpl, Utils, TagAttributeItemView, VTagList, UrlLinks, platform) {
 
     var CreateTagLayoutView = Backbone.Marionette.CompositeView.extend(
         /** @lends CreateTagLayoutView */
@@ -81,9 +83,14 @@ define(['require',
                     this.create = true;
                 }
                 this.collection = new Backbone.Collection();
+                this.typeEnum = new VTagList();
+                this.typeEnum.url = UrlLinks.typedefsUrl().defs;
+                this.typeEnum.modelAttrName = "enumDefs";
             },
             bindEvents: function() {},
             onRender: function() {
+                var that = this;
+                this.$('.fontLoader').show();
                 if (this.create) {
                     this.tagCollectionList();
                 } else {
@@ -92,13 +99,23 @@ define(['require',
                 if (!('placeholder' in HTMLInputElement.prototype)) {
                     this.ui.createTagForm.find('input,textarea').placeholder();
                 }
+                that.typeEnum.fetch({
+                    reset: true,
+                    complete: function(model, response) {
+                        that.hideLoader();
+                    }
+                });
             },
             tagCollectionList: function() {
                 var str = '',
                     that = this;
                 this.ui.parentTag.empty();
                 this.tagCollection.fullCollection.each(function(val) {
-                    str += '<option>' + (Utils.getName(val.toJSON())) + '</option>';
+                    var name = Utils.getName(val.toJSON()),
+                        checkTagOrTerm = Utils.checkTagOrTerm(name);
+                    if (checkTagOrTerm.tag) {
+                        str += '<option>' + (name) + '</option>';
+                    }
                 });
                 that.ui.parentTag.html(str);
                 // IE9 support
@@ -109,6 +126,10 @@ define(['require',
                         allowClear: true
                     });
                 }
+            },
+            hideLoader: function() {
+                this.$('.fontLoader').hide();
+                this.$('.hide').removeClass('hide');
             },
             collectionAttribute: function() {
                 this.collection.add(new Backbone.Model({
@@ -127,6 +148,7 @@ define(['require',
                 if (!('placeholder' in HTMLInputElement.prototype)) {
                     this.ui.addAttributeDiv.find('input,textarea').placeholder();
                 }
+
             }
         });
     return CreateTagLayoutView;

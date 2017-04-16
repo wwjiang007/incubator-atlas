@@ -20,19 +20,15 @@ package org.apache.atlas.repository.store.graph.v1;
 
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.SearchFilter;
 import org.apache.atlas.model.typedef.AtlasClassificationDef;
-import org.apache.atlas.model.typedef.AtlasClassificationDef.AtlasClassificationDefs;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasClassificationDefStore;
-import org.apache.atlas.repository.util.FilterUtil;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.type.AtlasTypeUtil;
 import org.apache.atlas.typesystem.types.DataTypes.TypeCategory;
-import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -262,6 +258,10 @@ public class AtlasClassificationDefStoreV1 extends AtlasAbstractDefStoreV1 imple
 
         AtlasVertex ret = typeDefStore.findTypeVertexByNameAndCategory(name, TypeCategory.TRAIT);
 
+        if (AtlasGraphUtilsV1.typeHasInstanceVertex(name)) {
+            throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_REFERENCES, name);
+        }
+
         if (ret == null) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, name);
         }
@@ -304,6 +304,12 @@ public class AtlasClassificationDefStoreV1 extends AtlasAbstractDefStoreV1 imple
 
         AtlasVertex ret = typeDefStore.findTypeVertexByGuidAndCategory(guid, TypeCategory.TRAIT);
 
+        String typeName = AtlasGraphUtilsV1.getProperty(ret, Constants.TYPENAME_PROPERTY_KEY, String.class);
+
+        if (AtlasGraphUtilsV1.typeHasInstanceVertex(typeName)) {
+            throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_REFERENCES, typeName);
+        }
+
         if (ret == null) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_GUID_NOT_FOUND, guid);
         }
@@ -340,7 +346,7 @@ public class AtlasClassificationDefStoreV1 extends AtlasAbstractDefStoreV1 imple
 
     private void updateVertexPreCreate(AtlasClassificationDef  classificationDef,
                                        AtlasClassificationType classificationType,
-                                       AtlasVertex             vertex) {
+                                       AtlasVertex             vertex) throws AtlasBaseException {
         AtlasStructDefStoreV1.updateVertexPreCreate(classificationDef, classificationType, vertex, typeDefStore);
     }
 

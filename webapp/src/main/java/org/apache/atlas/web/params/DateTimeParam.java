@@ -18,6 +18,7 @@
 
 package org.apache.atlas.web.params;
 
+import org.apache.atlas.exception.AtlasBaseException;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 
@@ -32,7 +33,7 @@ public class DateTimeParam extends AbstractParam<DateTime> {
     }
 
     @Override
-    protected DateTime parse(String input) throws Exception {
-        return new DateTime(input, DateTimeZone.UTC);
+    protected DateTime parse(String input) throws AtlasBaseException {
+            return new DateTime(input, DateTimeZone.UTC);
     }
 }

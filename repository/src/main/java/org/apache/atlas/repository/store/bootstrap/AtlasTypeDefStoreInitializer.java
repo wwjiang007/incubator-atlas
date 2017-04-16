@@ -23,6 +23,7 @@ import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
 import org.apache.atlas.model.typedef.AtlasClassificationDef;
 import org.apache.atlas.model.typedef.AtlasEntityDef;
 import org.apache.atlas.model.typedef.AtlasEnumDef;
+import org.apache.atlas.model.typedef.AtlasEnumDef.AtlasEnumElementDef;
 import org.apache.atlas.model.typedef.AtlasStructDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
@@ -31,6 +32,7 @@ import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
+import org.apache.commons.lang.ObjectUtils;
 import org.codehaus.jackson.annotate.JsonAutoDetect;
 import org.codehaus.jackson.annotate.JsonIgnoreProperties;
 import org.codehaus.jackson.map.annotate.JsonSerialize;
@@ -87,16 +89,16 @@ public class AtlasTypeDefStoreInitializer {
                 }
 
                 AtlasTypesDef typesToCreate = getTypesToCreate(typesDef, typeRegistry);
+                AtlasTypesDef typesToUpdate = getTypesToUpdate(typesDef, typeRegistry);
 
-                if (typesToCreate.isEmpty()) {
+                if (!typesToCreate.isEmpty() || !typesToUpdate.isEmpty()) {
+                    typeDefStore.createUpdateTypesDef(typesToCreate, typesToUpdate);
+
+                    LOG.info("Created/Updated types defined in file {}", typeDefFile.getAbsolutePath());
+                } else {
                     LOG.info("No new type in file {}", typeDefFile.getAbsolutePath());
-
-                    continue;
                 }
 
-                LOG.info("Loading types defined in file {}", typeDefFile.getAbsolutePath());
-
-                typeDefStore.createTypesDef(typesToCreate);
             } catch (Throwable t) {
                 LOG.error("error while registering types in file {}", typeDefFile.getAbsolutePath(), t);
             }
@@ -143,6 +145,100 @@ public class AtlasTypeDefStoreInitializer {
         return typesToCreate;
     }
 
+    public static AtlasTypesDef getTypesToUpdate(AtlasTypesDef typesDef, AtlasTypeRegistry typeRegistry) {
+        AtlasTypesDef typesToUpdate = new AtlasTypesDef();
+
+        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
+            for (AtlasStructDef newStructDef : typesDef.getStructDefs()) {
+                AtlasStructDef  oldStructDef = typeRegistry.getStructDefByName(newStructDef.getName());
+
+                if (oldStructDef == null) {
+                    continue;
+                }
+
+                if (updateTypeAttributes(oldStructDef, newStructDef)) {
+                    typesToUpdate.getStructDefs().add(newStructDef);
+                }
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
+            for (AtlasClassificationDef newClassifDef : typesDef.getClassificationDefs()) {
+                AtlasClassificationDef  oldClassifDef = typeRegistry.getClassificationDefByName(newClassifDef.getName());
+
+                if (oldClassifDef == null) {
+                    continue;
+                }
+
+                if (updateTypeAttributes(oldClassifDef, newClassifDef)) {
+                    typesToUpdate.getClassificationDefs().add(newClassifDef);
+                }
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
+            for (AtlasEntityDef newEntityDef : typesDef.getEntityDefs()) {
+                AtlasEntityDef  oldEntityDef = typeRegistry.getEntityDefByName(newEntityDef.getName());
+
+                if (oldEntityDef == null) {
+                    continue;
+                }
+
+                if (updateTypeAttributes(oldEntityDef, newEntityDef)) {
+                    typesToUpdate.getEntityDefs().add(newEntityDef);
+                }
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
+            for (AtlasEnumDef newEnumDef : typesDef.getEnumDefs()) {
+                AtlasEnumDef  oldEnumDef = typeRegistry.getEnumDefByName(newEnumDef.getName());
+
+                if (oldEnumDef == null) {
+                    continue;
+                }
+
+                if (isTypeUpdateApplicable(oldEnumDef, newEnumDef)) {
+                    if (CollectionUtils.isNotEmpty(oldEnumDef.getElementDefs())) {
+                        for (AtlasEnumElementDef oldEnumElem : oldEnumDef.getElementDefs()) {
+                            if (!newEnumDef.hasElement(oldEnumElem.getValue())) {
+                                newEnumDef.addElement(oldEnumElem);
+                            }
+                        }
+                    }
+
+                    typesToUpdate.getEnumDefs().add(newEnumDef);
+                }
+            }
+        }
+
+        return typesToUpdate;
+    }
+
+    private static boolean updateTypeAttributes(AtlasStructDef oldStructDef, AtlasStructDef newStructDef) {
+        boolean ret = isTypeUpdateApplicable(oldStructDef, newStructDef);
+
+        if (ret) {
+            // make sure that all attributes in oldDef are in newDef as well
+            if (CollectionUtils.isNotEmpty(oldStructDef.getAttributeDefs())){
+                for (AtlasAttributeDef oldAttrDef : oldStructDef.getAttributeDefs()) {
+                    if (!newStructDef.hasAttribute(oldAttrDef.getName())) {
+                        newStructDef.addAttribute(oldAttrDef);
+                    }
+                }
+            }
+        }
+
+        return ret;
+    }
+
+    private static boolean isTypeUpdateApplicable(AtlasBaseTypeDef oldTypeDef, AtlasBaseTypeDef newTypeDef) {
+        String oldTypeVersion = oldTypeDef.getTypeVersion();
+        String newTypeVersion = newTypeDef.getTypeVersion();
+
+        return ObjectUtils.compare(newTypeVersion, oldTypeVersion) > 0;
+    }
+
     private void applyTypePatches(AtlasTypeDefStore typeDefStore, AtlasTypeRegistry typeRegistry, String typesDirName) {
         String typePatchesDirName = typesDirName + File.separator + "patches";
         File   typePatchesDir     = new File(typePatchesDirName);
@@ -160,6 +256,7 @@ public class AtlasTypeDefStoreInitializer {
         PatchHandler[] patchHandlers = new PatchHandler[] {
                 new AddAttributePatchHandler(typeDefStore, typeRegistry),
                 new UpdateTypeDefOptionsPatchHandler(typeDefStore, typeRegistry),
+                new UpdateAttributePatchHandler(typeDefStore, typeRegistry)
         };
 
         Map<String, PatchHandler> patchHandlerRegistry = new HashMap<>();
@@ -377,6 +474,69 @@ public class AtlasTypeDefStoreInitializer {
             } else {
                 LOG.info("patch skipped: typeName={}; applyToVersion={}; updateToVersion={}",
                         patch.getTypeName(), patch.getApplyToVersion(), patch.getUpdateToVersion());
+            }
+        }
+    }
+
+    class UpdateAttributePatchHandler extends PatchHandler {
+        public UpdateAttributePatchHandler(AtlasTypeDefStore typeDefStore, AtlasTypeRegistry typeRegistry) {
+            super(typeDefStore, typeRegistry, new String[] { "UPDATE_ATTRIBUTE" });
+        }
+
+        @Override
+        public void applyPatch(TypeDefPatch patch) throws AtlasBaseException {
+            String           typeName = patch.getTypeName();
+            AtlasBaseTypeDef typeDef  = typeRegistry.getTypeDefByName(typeName);
+
+            if (typeDef == null) {
+                throw new AtlasBaseException(AtlasErrorCode.PATCH_FOR_UNKNOWN_TYPE, patch.getAction(), typeName);
+            }
+
+            if (isPatchApplicable(patch, typeDef)) {
+                if (typeDef.getClass().equals(AtlasEntityDef.class)) {
+                    AtlasEntityDef updatedDef = new AtlasEntityDef((AtlasEntityDef)typeDef);
+
+                    addOrUpdateAttributes(updatedDef, patch.getAttributeDefs());
+
+                    updatedDef.setTypeVersion(patch.getUpdateToVersion());
+
+                    typeDefStore.updateEntityDefByName(typeName, updatedDef);
+                } else if (typeDef.getClass().equals(AtlasClassificationDef.class)) {
+                    AtlasClassificationDef updatedDef = new AtlasClassificationDef((AtlasClassificationDef)typeDef);
+
+                    addOrUpdateAttributes(updatedDef, patch.getAttributeDefs());
+
+                    updatedDef.setTypeVersion(patch.getUpdateToVersion());
+
+                    typeDefStore.updateClassificationDefByName(typeName, updatedDef);
+                } else if (typeDef.getClass().equals(AtlasStructDef.class)) {
+                    AtlasStructDef updatedDef = new AtlasStructDef((AtlasStructDef)typeDef);
+
+                    addOrUpdateAttributes(updatedDef, patch.getAttributeDefs());
+
+                    updatedDef.setTypeVersion(patch.getUpdateToVersion());
+
+                    typeDefStore.updateStructDefByName(typeName, updatedDef);
+
+                } else {
+                    throw new AtlasBaseException(AtlasErrorCode.PATCH_NOT_APPLICABLE_FOR_TYPE,
+                                                 patch.getAction(), typeDef.getClass().getSimpleName());
+                }
+            } else {
+                LOG.info("patch skipped: typeName={}; applyToVersion={}; updateToVersion={}",
+                          patch.getTypeName(), patch.getApplyToVersion(), patch.getUpdateToVersion());
+            }
+        }
+
+        private void addOrUpdateAttributes(AtlasStructDef structDef, List<AtlasAttributeDef> attributesToUpdate) {
+            for (AtlasAttributeDef attributeToUpdate : attributesToUpdate) {
+                String attrName = attributeToUpdate.getName();
+
+                if (structDef.hasAttribute(attrName)) {
+                    structDef.removeAttribute(attrName);
+                }
+
+                structDef.addAttribute(attributeToUpdate);
             }
         }
     }

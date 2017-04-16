@@ -37,11 +37,7 @@ define(['require',
             parseRecords: function(resp, options) {
                 this.queryType = resp.queryType;
                 this.queryText = resp.queryText;
-                if (resp.queryType && resp.queryType == "DSL") {
-                    return resp.entities ? resp.entities : [];
-                } else {
-                    return resp.fullTextResult ? resp.fullTextResult : [];
-                }
+                return resp.entities ? resp.entities : [];
             },
         },
         //Static Class Members

@@ -23,9 +23,10 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.impexp.AtlasImportResult;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntity;
-import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
+import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.instance.EntityMutationResponse;
+import org.apache.atlas.repository.store.graph.v1.EntityImportStream;
 import org.apache.atlas.repository.store.graph.v1.EntityStream;
 import org.apache.atlas.type.AtlasEntityType;
 
@@ -76,7 +77,7 @@ public interface AtlasEntityStore {
      * @return EntityMutationResponse Entity mutations operations with the corresponding set of entities on which these operations were performed
      * @throws AtlasBaseException
      */
-    EntityMutationResponse bulkImport(EntityStream entityStream, AtlasImportResult importResult) throws AtlasBaseException;
+    EntityMutationResponse bulkImport(EntityImportStream entityStream, AtlasImportResult importResult) throws AtlasBaseException;
 
     /**
      * Update a single entity
@@ -87,17 +88,7 @@ public interface AtlasEntityStore {
      *
      */
     EntityMutationResponse updateByUniqueAttributes(AtlasEntityType entityType, Map<String, Object> uniqAttributes,
-                                                    AtlasEntity entity) throws AtlasBaseException;
-
-    /**
-     * Partial update a single entity using its guid.
-     * @param entityType type of the entity
-     * @param guid Entity guid
-     * @return EntityMutationResponse details of the updates performed by this call
-     * @throws AtlasBaseException
-     *
-     */
-    EntityMutationResponse updateByGuid(AtlasEntityType entityType, String guid, AtlasEntity entity) throws AtlasBaseException;
+                                                    AtlasEntityWithExtInfo entity) throws AtlasBaseException;
 
     /**
      * Partial update entities attribute using its guid.

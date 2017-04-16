@@ -15,18 +15,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.atlas.web.resources;
+package org.apache.atlas.repository.impexp;
 
-import org.codehaus.jackson.type.TypeReference;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.model.impexp.AtlasExportResult;
 import org.apache.atlas.model.instance.AtlasEntity;
+import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.apache.atlas.repository.store.graph.v1.EntityImportStream;
 import org.codehaus.jackson.map.ObjectMapper;
+import org.codehaus.jackson.type.TypeReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -40,12 +44,12 @@ import static org.apache.atlas.AtlasErrorCode.JSON_ERROR_OBJECT_MAPPER_NULL_RETU
 public class ZipSource implements EntityImportStream {
     private static final Logger LOG = LoggerFactory.getLogger(ZipSource.class);
 
-    private final ByteArrayInputStream          inputStream;
+    private final InputStream                   inputStream;
     private List<String>                        creationOrder;
     private Iterator<String>                    iterator;
     private Map<String, String>                 guidEntityJsonMap;
 
-    public ZipSource(ByteArrayInputStream inputStream) throws IOException {
+    public ZipSource(InputStream inputStream) throws IOException {
         this.inputStream = inputStream;
         guidEntityJsonMap = new HashMap<>();
 
@@ -56,8 +60,15 @@ public class ZipSource implements EntityImportStream {
     public AtlasTypesDef getTypesDef() throws AtlasBaseException {
         final String fileName = ZipExportFileNames.ATLAS_TYPESDEF_NAME.toString();
 
-        String s = getFromCache(fileName);
+        String s = (String) getFromCache(fileName);
         return convertFromJson(AtlasTypesDef.class, s);
+    }
+
+    public AtlasExportResult getExportResult() throws AtlasBaseException {
+        final String fileName = ZipExportFileNames.ATLAS_EXPORT_INFO_NAME.toString();
+
+        String s = getFromCache(fileName);
+        return convertFromJson(AtlasExportResult.class, s);
     }
 
     private void setCreationOrder() {
@@ -73,8 +84,6 @@ public class ZipSource implements EntityImportStream {
     }
 
     private void updateGuidZipEntryMap() throws IOException {
-
-        inputStream.reset();
 
         ZipInputStream zipInputStream = new ZipInputStream(inputStream);
         ZipEntry zipEntry = zipInputStream.getNextEntry();
@@ -103,9 +112,10 @@ public class ZipSource implements EntityImportStream {
         return this.creationOrder;
     }
 
-    public AtlasEntity getEntity(String guid) throws AtlasBaseException {
-        String s = getFromCache(guid);
-        return convertFromJson(AtlasEntity.class, s);
+    public AtlasEntity.AtlasEntityWithExtInfo getEntityWithExtInfo(String guid) throws AtlasBaseException {
+        String s = (String) getFromCache(guid);
+        AtlasEntity.AtlasEntityWithExtInfo entityWithExtInfo = convertFromJson(AtlasEntity.AtlasEntityWithExtInfo.class, s);
+        return entityWithExtInfo;
     }
 
     private <T> T convertFromJson(TypeReference clazz, String jsonData) throws AtlasBaseException {
@@ -135,9 +145,7 @@ public class ZipSource implements EntityImportStream {
     }
 
     private String getFromCache(String entryName) {
-        if(!guidEntityJsonMap.containsKey(entryName)) return "";
-
-        return guidEntityJsonMap.get(entryName).toString();
+        return guidEntityJsonMap.get(entryName);
     }
 
     public void close() {
@@ -157,8 +165,15 @@ public class ZipSource implements EntityImportStream {
 
     @Override
     public AtlasEntity next() {
+        AtlasEntityWithExtInfo entityWithExtInfo = getNextEntityWithExtInfo();
+
+        return entityWithExtInfo != null ? entityWithExtInfo.getEntity() : null;
+    }
+
+    @Override
+    public AtlasEntityWithExtInfo getNextEntityWithExtInfo() {
         try {
-            return getEntity(this.iterator.next());
+            return getEntityWithExtInfo(this.iterator.next());
         } catch (AtlasBaseException e) {
             e.printStackTrace();
             return null;
@@ -183,5 +198,19 @@ public class ZipSource implements EntityImportStream {
             e.printStackTrace();
             return null;
         }
+    }
+
+    private AtlasEntity getEntity(String guid) throws AtlasBaseException {
+        if(guidEntityJsonMap.containsKey(guid)) {
+            AtlasEntityWithExtInfo extInfo = getEntityWithExtInfo(guid);
+            return (extInfo != null) ? extInfo.getEntity() : null;
+        }
+
+        return null;
+    }
+
+    @Override
+    public void onImportComplete(String guid) {
+        guidEntityJsonMap.remove(guid);
     }
 }
