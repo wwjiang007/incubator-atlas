@@ -18,30 +18,11 @@
 
 package org.apache.atlas.discovery;
 
-import static org.apache.atlas.typesystem.types.utils.TypesUtil.createClassTypeDef;
-import static org.apache.atlas.typesystem.types.utils.TypesUtil.createOptionalAttrDef;
-import static org.apache.atlas.typesystem.types.utils.TypesUtil.createRequiredAttrDef;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNotNull;
-
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import javax.inject.Inject;
-
+import com.google.common.collect.ImmutableSet;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.BaseRepositoryTest;
-import org.apache.atlas.RepositoryMetadataModule;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.TestOnlyModule;
 import org.apache.atlas.TestUtils;
 import org.apache.atlas.discovery.graph.GraphBackedDiscoveryService;
 import org.apache.atlas.query.QueryParams;
@@ -64,7 +45,6 @@ import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.testng.Assert;
-import org.testng.SkipException;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeMethod;
@@ -72,9 +52,17 @@ import org.testng.annotations.DataProvider;
 import org.testng.annotations.Guice;
 import org.testng.annotations.Test;
 
-import com.google.common.collect.ImmutableSet;
+import javax.inject.Inject;
+import java.text.SimpleDateFormat;
+import java.util.*;
 
-@Guice(modules = RepositoryMetadataModule.class)
+import static org.apache.atlas.typesystem.types.utils.TypesUtil.createClassTypeDef;
+import static org.apache.atlas.typesystem.types.utils.TypesUtil.createOptionalAttrDef;
+import static org.apache.atlas.typesystem.types.utils.TypesUtil.createRequiredAttrDef;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertNotNull;
+
+@Guice(modules = TestOnlyModule.class)
 public class GraphBackedDiscoveryServiceTest extends BaseRepositoryTest {
 
     @Inject
@@ -266,6 +254,22 @@ public class GraphBackedDiscoveryServiceTest extends BaseRepositoryTest {
         //Assert that entity state is set in the result entities
         String entityState = rows.getJSONObject(0).getJSONObject("$id$").getString("state");
         assertEquals(entityState, Id.EntityState.ACTIVE.name());
+    }
+
+    @DataProvider(name = "dslLikeQueriesProvider")
+    private Object[][] createDslLikeQueries() {
+        return new Object[][]{
+                {"hive_table where name like \"sa?es*\"", 3},
+                {"hive_db where name like \"R*\"", 1},
+                {"hive_db where hive_db.name like \"R???rt?*\" or hive_db.name like \"S?l?s\" or hive_db.name like\"Log*\"", 3},
+                {"hive_db where hive_db.name like \"R???rt?*\" and hive_db.name like \"S?l?s\" and hive_db.name like\"Log*\"", 0},
+                {"hive_table where name like 'sales*', db where name like 'Sa?es'", 1},
+        };
+    }
+
+    @Test(dataProvider = "dslLikeQueriesProvider")
+    public void testDslSearchUsingLikeOperator(String dslQuery, Integer expectedNumRows) throws Exception {
+        runQuery(dslQuery, expectedNumRows, 50, 0);
     }
 
     @Test(expectedExceptions = Throwable.class)
@@ -1006,6 +1010,18 @@ public class GraphBackedDiscoveryServiceTest extends BaseRepositoryTest {
         System.out.println("results = " + results);
     }
 
+    @Test
+    public void testSearchForTypeWithReservedKeywordAttributes() throws Exception {
+        createTypesWithReservedKeywordAttributes();
+
+        String dslQuery = "from OrderType where `order` = 1";
+        String jsonResults = searchByDSL(dslQuery);
+        assertNotNull(jsonResults);
+
+        JSONObject results = new JSONObject(jsonResults);
+        System.out.println("results = " + results);
+    }
+
     /*
      * Type Hierarchy is:
      *   A(a)
@@ -1026,6 +1042,15 @@ public class GraphBackedDiscoveryServiceTest extends BaseRepositoryTest {
                 createClassTypeDef("D", ImmutableSet.of("C"), createOptionalAttrDef("d", DataTypes.SHORT_TYPE));
 
         TypeSystem.getInstance().defineClassTypes(A, B, C, D);
+    }
+
+    private void createTypesWithReservedKeywordAttributes() throws Exception {
+        HierarchicalTypeDefinition orderType = createClassTypeDef("OrderType", null, createRequiredAttrDef("order", DataTypes.INT_TYPE));
+
+        HierarchicalTypeDefinition limitType =
+            createClassTypeDef("LimitType", null, createOptionalAttrDef("limit", DataTypes.BOOLEAN_TYPE));
+
+        TypeSystem.getInstance().defineClassTypes(orderType, limitType);
     }
 
     private void createInstances() throws Exception {

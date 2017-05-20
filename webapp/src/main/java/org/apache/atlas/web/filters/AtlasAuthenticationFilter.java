@@ -22,6 +22,7 @@ import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.security.SecurityProperties;
 import org.apache.atlas.utils.AuthenticationUtil;
+import org.apache.atlas.web.security.AtlasAuthenticationProvider;
 import org.apache.atlas.web.util.Servlets;
 import org.apache.commons.collections.iterators.IteratorEnumeration;
 import org.apache.commons.configuration.Configuration;
@@ -86,6 +87,7 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
     public final boolean isKerberos = AuthenticationUtil.isKerberosAuthenticationEnabled();
     private boolean isInitializedByTomcat;
     private Set<Pattern> browserUserAgents;
+    private boolean supportKeyTabBrowserLogin = false;
 
     public AtlasAuthenticationFilter() {
         try {
@@ -191,16 +193,16 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
             authMethod = "kerberos";
         }
 
-        if(configuration.getString("atlas.authentication.method.kerberos.name.rules")!=null) {
+        if (configuration.getString("atlas.authentication.method.kerberos.name.rules") != null) {
             config.put("kerberos.name.rules", configuration.getString("atlas.authentication.method.kerberos.name.rules"));
         }
-        if(configuration.getString("atlas.authentication.method.kerberos.keytab")!=null) {
+        if (configuration.getString("atlas.authentication.method.kerberos.keytab") != null) {
             config.put("kerberos.keytab", configuration.getString("atlas.authentication.method.kerberos.keytab"));
         }
-        if(configuration.getString("atlas.authentication.method.kerberos.principal")!=null) {
+        if (configuration.getString("atlas.authentication.method.kerberos.principal") != null) {
             config.put("kerberos.principal", configuration.getString("atlas.authentication.method.kerberos.principal"));
         }
-        config.put(AuthenticationFilter.AUTH_TYPE, authMethod );
+        config.put(AuthenticationFilter.AUTH_TYPE, authMethod);
         config.put(AuthenticationFilter.COOKIE_PATH, "/");
 
         // add any config passed in as init parameters
@@ -232,6 +234,7 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
 
         LOG.debug(" AuthenticationFilterConfig: {}", config);
 
+        supportKeyTabBrowserLogin = configuration.getBoolean("atlas.authentication.method.kerberos.support.keytab.browser.login", false);
         String agents = configuration.getString(AtlasCSRFPreventionFilter.BROWSER_USER_AGENT_PARAM, AtlasCSRFPreventionFilter.BROWSER_USER_AGENTS_DEFAULT);
 
         if (agents == null) {
@@ -264,13 +267,8 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
                     }
 
                     if ((existingAuth == null || !existingAuth.isAuthenticated()) && (!StringUtils.isEmpty(userName))) {
-                        UserGroupInformation ugi = UserGroupInformation.getLoginUser();
-                        String[] groupsName = ugi.getGroupNames();
 
-                        final List<GrantedAuthority> grantedAuths = new ArrayList<>();
-                        for (String group : groupsName) {
-                            grantedAuths.add(new SimpleGrantedAuthority(group));
-                        }
+                        List<GrantedAuthority> grantedAuths = AtlasAuthenticationProvider.getAuthoritiesFromUGI(userName);
 
                         final UserDetails principal = new User(userName, "", grantedAuths);
                         final Authentication finalAuthentication = new UsernamePasswordAuthenticationToken(principal, "", grantedAuths);
@@ -290,7 +288,7 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
                         String requestUser = httpRequest.getRemoteUser();
                         NDC.push(requestUser + ":" + httpRequest.getMethod() + httpRequest.getRequestURI());
                         RequestContext requestContext = RequestContext.get();
-                        if(requestContext!=null) {
+                        if (requestContext != null) {
                             requestContext.setUser(requestUser);
                         }
                         LOG.info("Request from authenticated user: {}, URL={}", requestUser,
@@ -340,14 +338,14 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
      * If the request has a valid authentication token it allows the request to continue to the target resource,
      * otherwise it triggers an authentication sequence using the configured {@link org.apache.hadoop.security.authentication.server.AuthenticationHandler}.
      *
-     * @param request the request object.
-     * @param response the response object.
+     * @param request     the request object.
+     * @param response    the response object.
      * @param filterChain the filter chain object.
      *
-     * @throws IOException thrown if an IO error occurred.
+     * @throws IOException      thrown if an IO error occurred.
      * @throws ServletException thrown if a processing error occurred.
      */
-    public void doKerberosAuth(ServletRequest request, ServletResponse response, FilterChain filterChainWrapper ,FilterChain filterChain )
+    public void doKerberosAuth(ServletRequest request, ServletResponse response, FilterChain filterChainWrapper, FilterChain filterChain)
             throws IOException, ServletException {
         boolean unauthorizedResponse = true;
         int errCode = HttpServletResponse.SC_UNAUTHORIZED;
@@ -355,14 +353,13 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
         HttpServletRequest httpRequest = (HttpServletRequest) request;
         HttpServletResponse httpResponse = (HttpServletResponse) response;
         boolean isHttps = "https".equals(httpRequest.getScheme());
-        AuthenticationHandler   authHandler = getAuthenticationHandler();
+        AuthenticationHandler authHandler = getAuthenticationHandler();
         try {
             boolean newToken = false;
             AuthenticationToken token;
             try {
                 token = getToken(httpRequest);
-            }
-            catch (AuthenticationException ex) {
+            } catch (AuthenticationException ex) {
                 LOG.warn("AuthenticationToken ignored: {}", ex.getMessage());
                 // will be sent back in a 401 unless filter authenticates
                 authenticationEx = ex;
@@ -432,7 +429,7 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
                     errCode = HttpServletResponse.SC_FORBIDDEN;
                 }
                 if (authenticationEx == null) { // added this code for atlas error handling and fallback
-                    if (isBrowser(httpRequest.getHeader("User-Agent"))) {
+                    if (!supportKeyTabBrowserLogin && isBrowser(httpRequest.getHeader("User-Agent"))) {
                         filterChain.doFilter(request, response);
                     } else {
                         boolean chk = true;
@@ -509,27 +506,27 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
 
     public static void createAuthCookie(HttpServletResponse resp, String token, String domain, String path, long expires, boolean isSecure) {
         StringBuilder sb = (new StringBuilder(AuthenticatedURL.AUTH_COOKIE)).append("=");
-        if(token != null && token.length() > 0) {
+        if (token != null && token.length() > 0) {
             sb.append("\"").append(token).append("\"");
         }
 
         sb.append("; Version=1");
-        if(path != null) {
+        if (path != null) {
             sb.append("; Path=").append(path);
         }
 
-        if(domain != null) {
+        if (domain != null) {
             sb.append("; Domain=").append(domain);
         }
 
-        if(expires >= 0L) {
+        if (expires >= 0L) {
             Date date = new Date(expires);
             SimpleDateFormat df = new SimpleDateFormat("EEE, dd-MMM-yyyy HH:mm:ss zzz");
             df.setTimeZone(TimeZone.getTimeZone("GMT"));
             sb.append("; Expires=").append(df.format(date));
         }
 
-        if(isSecure) {
+        if (isSecure) {
             sb.append("; Secure");
         }
 
@@ -558,7 +555,7 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
 
         if (tokenStr != null) {
             token = AuthenticationToken.parse(tokenStr);
-            if(token != null) {
+            if (token != null) {
                 AuthenticationHandler authHandler = getAuthenticationHandler();
                 if (!token.getType().equals(authHandler.getType())) {
                     throw new AuthenticationException("Invalid AuthenticationToken type");

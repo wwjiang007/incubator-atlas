@@ -22,8 +22,9 @@ define(['require',
     'utils/Utils',
     'utils/Messages',
     'utils/Globals',
-    'utils/UrlLinks'
-], function(require, Backbone, TagLayoutViewTmpl, Utils, Messages, Globals, UrlLinks) {
+    'utils/UrlLinks',
+    'models/VTag'
+], function(require, Backbone, TagLayoutViewTmpl, Utils, Messages, Globals, UrlLinks, VTag) {
     'use strict';
 
     var TagLayoutView = Backbone.Marionette.LayoutView.extend(
@@ -58,11 +59,11 @@ define(['require',
              * @constructs
              */
             initialize: function(options) {
-                _.extend(this, _.pick(options, 'tag', 'collection'));
+                _.extend(this, _.pick(options, 'tag', 'collection', 'typeHeaders'));
             },
             bindEvents: function() {
                 var that = this;
-                this.listenTo(this.collection, "reset add", function() {
+                this.listenTo(this.collection, "reset add remove", function() {
                     this.tagsAndTypeGenerator('collection');
                 }, this);
                 this.ui.tagsParent.on('click', 'li.parent-node a', function() {
@@ -96,30 +97,40 @@ define(['require',
                 }
             },
             setValues: function(manual) {
+                var $firstEl = this.ui.tagsParent.find('li a') ? this.ui.tagsParent.find('li a').first() : null;
                 if (Utils.getUrlState.isTagTab()) {
                     if (!this.tag) {
                         this.selectFirst = false;
                         this.ui.tagsParent.find('li').first().addClass('active');
-                        if (this.ui.tagsParent.find('li a').first().length) {
+                        if ($firstEl && $firstEl.length) {
+                            url: $firstEl.attr("href"),
                             Utils.setUrl({
-                                url: this.ui.tagsParent.find('li a').first().attr("href"),
+                                url: $firstEl.attr("href"),
                                 mergeBrowserUrl: false,
-                                trigger: true,
                                 updateTabState: function() {
                                     return { tagUrl: this.url, stateChanged: true };
                                 }
                             });
                         }
                     } else {
+                        var presentTag = this.collection.fullCollection.findWhere({ name: this.tag }),
+                            url = Utils.getUrlState.getQueryUrl().hash,
+                            tag = this.tag,
+                            query = null;
+                        if (!presentTag) {
+                            tag = $firstEl.data('name');
+                            url = $firstEl && $firstEl.length ? $firstEl.attr("href") : '#!/tag';
+                            query = $firstEl && $firstEl.length ? { dlttag: true } : null
+                        }
                         Utils.setUrl({
-                            url: Utils.getUrlState.getQueryUrl().hash,
+                            url: url,
+                            urlParams: query,
                             updateTabState: function() {
                                 return { tagUrl: this.url, stateChanged: true };
                             }
                         });
-                        var tag = Utils.getUrlState.getLastValue();
-                        if (this.tag) {
-                            tag = this.tag;
+                        if (!presentTag) {
+                            return false;
                         }
                         this.ui.tagsParent.find('li').removeClass('active');
                         var target = this.ui.tagsParent.find('li').filter(function() {
@@ -163,7 +174,6 @@ define(['require',
                 if (this.createTag) {
                     this.createTag = false;
                 }
-
             },
             onClickCreateTag: function(e) {
                 var that = this;
@@ -257,9 +267,8 @@ define(['require',
                             duplicateAttributeList.push(obj.name);
                         }
                     });
-
-
                     var notifyObj = {
+                        modal: true,
                         confirm: {
                             confirm: true,
                             buttons: [{
@@ -288,7 +297,6 @@ define(['require',
                         Utils.notifyConfirm(notifyObj);
                         return false;
                     }
-
                 }
                 this.json = {
                     classificationDefs: [{
@@ -312,6 +320,7 @@ define(['require',
                             content: "Tag " + that.name + Messages.addSuccessMessage
                         });
                         modal.trigger('cancel');
+                        that.typeHeaders.fetch({ reset: true });
                     }
                 });
             },
@@ -342,7 +351,8 @@ define(['require',
                     container: 'body',
                     content: function() {
                         return "<ul class='tagPopoverList'>" +
-                            "<li class='listTerm' ><i class='fa fa-search'></i> <a href='javascript:void(0)' data-fn='onSearchTerm'>Search Tag</a></li>" +
+                            "<li class='listTerm' ><i class='fa fa-search'></i> <a href='javascript:void(0)' data-fn='onSearchTag'>Search Tag</a></li>" +
+                            "<li class='listTerm' ><i class='fa fa-trash-o'></i> <a href='javascript:void(0)' data-fn='onDeleteTag'>Delete Tag</a></li>" +
                             "</ul>";
                     }
                 });
@@ -353,7 +363,7 @@ define(['require',
                     $(this).popover('toggle');
                 });
             },
-            onSearchTerm: function() {
+            onSearchTag: function() {
                 Utils.setUrl({
                     url: '#!/search/searchResult',
                     urlParams: {
@@ -366,6 +376,49 @@ define(['require',
                     },
                     mergeBrowserUrl: false,
                     trigger: true
+                });
+            },
+            onDeleteTag: function() {
+                var that = this;
+                this.tagName = this.ui.tagsParent.find('li.active').find("a").data('name');
+                this.tagDeleteData = this.ui.tagsParent.find('li.active');
+                var notifyObj = {
+                    modal: true,
+                    ok: function(argument) {
+                        that.onNotifyOk();
+                    },
+                    cancel: function(argument) {}
+                }
+                var text = "Are you sure you want to delete the tag"
+                notifyObj['text'] = text;
+                Utils.notifyConfirm(notifyObj);
+            },
+            onNotifyOk: function(data) {
+                var that = this,
+                    deleteTagData = this.collection.fullCollection.findWhere({ name: this.tagName }),
+                    classificationData = deleteTagData.toJSON(),
+                    deleteJson = {
+                        classificationDefs: [classificationData],
+                        entityDefs: [],
+                        enumDefs: [],
+                        structDefs: []
+                    };
+                deleteTagData.deleteTag({
+                    data: JSON.stringify(deleteJson),
+                    success: function() {
+                        Utils.notifySuccess({
+                            content: "Tag " + that.tagName + Messages.deleteSuccessMessage
+                        });
+                        // if deleted tag is prviously searched then remove that tag url from save state of tab.
+                        var searchUrl = Globals.saveApplicationState.tabState.searchUrl;
+                        var urlObj = Utils.getUrlState.getQueryParams(searchUrl);
+                        if (urlObj && urlObj.tag && urlObj.tag === that.tagName) {
+                            Globals.saveApplicationState.tabState.searchUrl = "#!/search";
+                        }
+                        that.collection.remove(deleteTagData);
+                        // to update tag list of search tab fetch typeHeaders.
+                        that.typeHeaders.fetch({ reset: true });
+                    }
                 });
             }
         });

@@ -104,7 +104,7 @@ define(['require',
              * @constructs
              */
             initialize: function(options) {
-                _.extend(this, _.pick(options, 'collection', 'id', 'entityDefCollection', 'typeHeaders'));
+                _.extend(this, _.pick(options, 'collection', 'id', 'entityDefCollection', 'typeHeaders', 'enumDefCollection'));
                 this.bindEvents();
             },
             bindEvents: function() {
@@ -171,10 +171,10 @@ define(['require',
                         entityName: this.name,
                         typeHeaders: this.typeHeaders,
                         entityDefCollection: this.entityDefCollection,
-                        fetchCollection: this.fetchCollection.bind(that)
+                        fetchCollection: this.fetchCollection.bind(that),
+                        enumDefCollection: this.enumDefCollection
                     }
-                    this.renderEntityDetailTableLayoutView(obj);
-                    this.renderAuditTableLayoutView(obj);
+                    this.getEntityDef(obj);
                     this.renderTagTableLayoutView(obj);
                     this.renderTermTableLayoutView(_.extend({}, obj, { term: true }));
                     // To render Schema check attribute "schemaElementsAttribute"
@@ -239,6 +239,17 @@ define(['require',
             },
             fetchCollection: function() {
                 this.collection.fetch({ reset: true });
+            },
+            getEntityDef: function(obj) {
+                var data = this.entityDefCollection.fullCollection.findWhere({ name: obj.entity.typeName }).toJSON();
+                var entityDef = Utils.getNestedSuperTypeObj({
+                    data: data,
+                    attrMerge: true,
+                    collection: this.entityDefCollection
+                });
+                obj['entityDef'] = entityDef;
+                this.renderEntityDetailTableLayoutView(obj);
+                this.renderAuditTableLayoutView(obj);
             },
             onClickTagCross: function(e) {
                 var tagName = $(e.currentTarget).parent().text(),
@@ -315,7 +326,8 @@ define(['require',
                             that.fetchCollection();
                         },
                         showLoader: that.showLoader.bind(that),
-                        hideLoader: that.hideLoader.bind(that)
+                        hideLoader: that.hideLoader.bind(that),
+                        enumDefCollection: that.enumDefCollection
                     });
                     view.modal.on('ok', function() {
                         Utils.showTitleLoader(that.$('.page-title .fontLoader'), that.$('.entityDetail'));

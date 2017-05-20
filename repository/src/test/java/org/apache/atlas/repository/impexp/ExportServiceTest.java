@@ -19,7 +19,7 @@ package org.apache.atlas.repository.impexp;
 
 
 import com.google.inject.Inject;
-import org.apache.atlas.RepositoryMetadataModule;
+import org.apache.atlas.TestOnlyModule;
 import org.apache.atlas.TestUtilsV2;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.impexp.AtlasExportRequest;
@@ -27,6 +27,7 @@ import org.apache.atlas.model.impexp.AtlasExportResult;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
+import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.store.bootstrap.AtlasTypeDefStoreInitializer;
 import org.apache.atlas.repository.store.graph.v1.AtlasEntityChangeNotifier;
 import org.apache.atlas.repository.store.graph.v1.AtlasEntityStoreV1;
@@ -35,9 +36,11 @@ import org.apache.atlas.repository.store.graph.v1.DeleteHandlerV1;
 import org.apache.atlas.repository.store.graph.v1.SoftDeleteHandlerV1;
 import org.apache.atlas.store.AtlasTypeDefStore;
 import org.apache.atlas.type.AtlasTypeRegistry;
-import org.junit.Assert;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.testng.Assert;
+import org.powermock.reflect.Whitebox;
+import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeTest;
 import org.testng.annotations.Guice;
@@ -54,8 +57,11 @@ import java.util.List;
 import java.util.Map;
 
 import static org.mockito.Mockito.mock;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertNotNull;
+import static org.testng.Assert.assertTrue;
 
-@Guice(modules = RepositoryMetadataModule.class)
+@Guice(modules = TestOnlyModule.class)
 public class ExportServiceTest {
     private static final Logger LOG = LoggerFactory.getLogger(ExportServiceTest.class);
 
@@ -91,6 +97,11 @@ public class ExportServiceTest {
     @BeforeTest
     public void setupExportService () throws AtlasBaseException {
         exportService = new ExportService(typeRegistry);
+    }
+
+    @AfterClass
+    public void clear() {
+        AtlasGraphProvider.cleanup();
     }
 
     private AtlasExportRequest getRequestForFullFetch() {
@@ -158,7 +169,6 @@ public class ExportServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ZipSink zipSink = new ZipSink(baos);
         AtlasExportResult result = exportService.run(zipSink, request, userName, hostName, requestingIP);
-        Assert.assertEquals(result.getOperationStatus(), AtlasExportResult.OperationStatus.SUCCESS);
 
         zipSink.close();
 
@@ -177,10 +187,10 @@ public class ExportServiceTest {
         ZipSink zipSink = new ZipSink(baos);
         AtlasExportResult result = exportService.run(zipSink, request, "admin", hostName, requestingIP);
 
-        Assert.assertNotNull(exportService);
-        Assert.assertEquals(result.getHostName(), hostName);
-        Assert.assertEquals(result.getClientIpAddress(), requestingIP);
-        Assert.assertEquals(request, result.getRequest());
+        assertNotNull(exportService);
+        assertEquals(result.getHostName(), hostName);
+        assertEquals(result.getClientIpAddress(), requestingIP);
+        assertEquals(request, result.getRequest());
     }
 
     @Test
@@ -198,8 +208,8 @@ public class ExportServiceTest {
         ByteArrayInputStream bais = new ByteArrayInputStream(baos.toByteArray());
         ZipSource zipSource = new ZipSource(bais);
 
-        Assert.assertNotNull(exportService);
-        Assert.assertNotNull(zipSource.getCreationOrder());
+        assertNotNull(exportService);
+        assertNotNull(zipSource.getCreationOrder());
         Assert.assertFalse(zipSource.hasNext());
     }
 
@@ -244,48 +254,109 @@ public class ExportServiceTest {
         verifyExportForEmployeeData(zipSource);
     }
 
+    @Test
+    public void verifyOverallStatus() throws Exception {
+
+        ExportService service = new ExportService(typeRegistry);
+        assertEquals(AtlasExportResult.OperationStatus.FAIL, Whitebox.invokeMethod(service,
+                "getOverallOperationStatus"));
+
+        assertEquals(AtlasExportResult.OperationStatus.SUCCESS, Whitebox.invokeMethod(service,
+                "getOverallOperationStatus",
+                AtlasExportResult.OperationStatus.SUCCESS));
+
+        assertEquals(AtlasExportResult.OperationStatus.SUCCESS, Whitebox.invokeMethod(service,
+                "getOverallOperationStatus",
+                                AtlasExportResult.OperationStatus.SUCCESS,
+                                AtlasExportResult.OperationStatus.SUCCESS,
+                                AtlasExportResult.OperationStatus.SUCCESS));
+
+        assertEquals(AtlasExportResult.OperationStatus.PARTIAL_SUCCESS, Whitebox.invokeMethod(service,
+                "getOverallOperationStatus",
+                AtlasExportResult.OperationStatus.FAIL,
+                AtlasExportResult.OperationStatus.PARTIAL_SUCCESS,
+                AtlasExportResult.OperationStatus.SUCCESS));
+
+        assertEquals(AtlasExportResult.OperationStatus.PARTIAL_SUCCESS, Whitebox.invokeMethod(service,
+                "getOverallOperationStatus",
+                AtlasExportResult.OperationStatus.FAIL,
+                AtlasExportResult.OperationStatus.FAIL,
+                AtlasExportResult.OperationStatus.PARTIAL_SUCCESS));
+
+        assertEquals(AtlasExportResult.OperationStatus.FAIL, Whitebox.invokeMethod(service,
+                "getOverallOperationStatus",
+                AtlasExportResult.OperationStatus.FAIL,
+                AtlasExportResult.OperationStatus.FAIL,
+                AtlasExportResult.OperationStatus.FAIL));
+
+
+    }
+
+    @Test
+    public void requestingExportOfNonExistentEntity_ReturnsFailure() throws Exception {
+        AtlasExportRequest request = getRequestForEmployee();
+        tamperEmployeeRequest(request);
+        ZipSource zipSource = runExportWithParameters(request);
+
+        assertNotNull(zipSource.getCreationOrder());
+        assertEquals(zipSource.getCreationOrder().size(), 0);
+        assertEquals(AtlasExportResult.OperationStatus.FAIL, zipSource.getExportResult().getOperationStatus());
+    }
+
+    private void tamperEmployeeRequest(AtlasExportRequest request) {
+        AtlasObjectId objectId = request.getItemsToExport().get(0);
+        objectId.getUniqueAttributes().remove("name");
+        objectId.getUniqueAttributes().put("qualifiedName", "XXX@121");
+    }
+
     private void verifyExportForEmployeeData(ZipSource zipSource) throws AtlasBaseException {
         final List<String> expectedEntityTypes = Arrays.asList(new String[]{"Manager", "Employee", "Department"});
 
-        Assert.assertNotNull(zipSource.getCreationOrder());
-        Assert.assertEquals(zipSource.getCreationOrder().size(), 2);
-        Assert.assertTrue(zipSource.hasNext());
+        assertNotNull(zipSource.getCreationOrder());
+        assertEquals(zipSource.getCreationOrder().size(), 2);
+        assertTrue(zipSource.hasNext());
 
         while (zipSource.hasNext()) {
             AtlasEntity entity = zipSource.next();
-            Assert.assertEquals(entity.getStatus(), AtlasEntity.Status.ACTIVE);
-            Assert.assertTrue(expectedEntityTypes.contains(entity.getTypeName()));
+
+            assertNotNull(entity);
+            assertEquals(AtlasEntity.Status.ACTIVE, entity.getStatus());
+            assertTrue(expectedEntityTypes.contains(entity.getTypeName()));
         }
 
         verifyTypeDefs(zipSource);
     }
 
     private void verifyExportForHrData(ZipSource zipSource) throws IOException, AtlasBaseException {
-        Assert.assertNotNull(zipSource.getCreationOrder());
-        Assert.assertTrue(zipSource.getCreationOrder().size() == 1);
-        Assert.assertTrue(zipSource.hasNext());
+        assertNotNull(zipSource.getCreationOrder());
+        assertTrue(zipSource.getCreationOrder().size() == 1);
+        assertTrue(zipSource.hasNext());
 
         AtlasEntity entity = zipSource.next();
-        Assert.assertTrue(entity.getTypeName().equals("Department"));
-        Assert.assertEquals(entity.getStatus(), AtlasEntity.Status.ACTIVE);
+
+        assertNotNull(entity);
+        assertTrue(entity.getTypeName().equals("Department"));
+        assertEquals(entity.getStatus(), AtlasEntity.Status.ACTIVE);
         verifyTypeDefs(zipSource);
     }
 
     private void verifyExportForHrDataForConnected(ZipSource zipSource) throws IOException, AtlasBaseException {
-        Assert.assertNotNull(zipSource.getCreationOrder());
-        Assert.assertTrue(zipSource.getCreationOrder().size() == 2);
-        Assert.assertTrue(zipSource.hasNext());
+        assertNotNull(zipSource.getCreationOrder());
+        assertTrue(zipSource.getCreationOrder().size() == 2);
+        assertTrue(zipSource.hasNext());
 
         AtlasEntity entity = zipSource.next();
-        Assert.assertTrue(entity.getTypeName().equals("Department"));
-        Assert.assertEquals(entity.getStatus(), AtlasEntity.Status.ACTIVE);
+
+        assertNotNull(entity);
+        assertTrue(entity.getTypeName().equals("Department"));
+        assertEquals(entity.getStatus(), AtlasEntity.Status.ACTIVE);
         verifyTypeDefs(zipSource);
     }
 
     private void verifyTypeDefs(ZipSource zipSource) throws AtlasBaseException {
-        Assert.assertEquals(zipSource.getTypesDef().getEnumDefs().size(), 1);
-        Assert.assertEquals(zipSource.getTypesDef().getClassificationDefs().size(), 0);
-        Assert.assertEquals(zipSource.getTypesDef().getStructDefs().size(), 1);
-        Assert.assertEquals(zipSource.getTypesDef().getEntityDefs().size(), 4);
+        assertEquals(zipSource.getTypesDef().getEnumDefs().size(), 1);
+        assertEquals(zipSource.getTypesDef().getClassificationDefs().size(), 0);
+        assertEquals(zipSource.getTypesDef().getStructDefs().size(), 1);
+        assertEquals(zipSource.getTypesDef().getEntityDefs().size(), 4);
     }
 }
