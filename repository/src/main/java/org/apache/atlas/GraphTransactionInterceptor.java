@@ -17,33 +17,42 @@
 
 package org.apache.atlas;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.aopalliance.intercept.MethodInvocation;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.typesystem.exception.NotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
+import javax.inject.Inject;
 import javax.ws.rs.core.Response;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
+@Component
 public class GraphTransactionInterceptor implements MethodInterceptor {
     private static final Logger LOG = LoggerFactory.getLogger(GraphTransactionInterceptor.class);
 
+    @VisibleForTesting
+    private static final ObjectUpdateSynchronizer OBJECT_UPDATE_SYNCHRONIZER = new ObjectUpdateSynchronizer();
     private static final ThreadLocal<List<PostTransactionHook>> postTransactionHooks = new ThreadLocal<>();
 
-    private AtlasGraph graph;
+    private final AtlasGraph graph;
+
+    @Inject
+    public GraphTransactionInterceptor(AtlasGraph graph) {
+        this.graph = graph;
+    }
 
     @Override
     public Object invoke(MethodInvocation invocation) throws Throwable {
-        
-        if (graph == null) {
-            graph = AtlasGraphProvider.getGraphInstance();
-        }
-
         boolean isSuccess = false;
 
         try {
@@ -80,7 +89,17 @@ public class GraphTransactionInterceptor implements MethodInterceptor {
                     }
                 }
             }
+
+            OBJECT_UPDATE_SYNCHRONIZER.releaseLockedObjects();
         }
+    }
+
+    public static void lockObjectAndReleasePostCommit(final String guid) {
+        OBJECT_UPDATE_SYNCHRONIZER.lockObject(guid);
+    }
+
+    public static void lockObjectAndReleasePostCommit(final List<String> guids) {
+        OBJECT_UPDATE_SYNCHRONIZER.lockObject(guids);
     }
 
     boolean logException(Throwable t) {
@@ -107,5 +126,108 @@ public class GraphTransactionInterceptor implements MethodInterceptor {
         }
 
         public abstract void onComplete(boolean isSuccess);
+    }
+
+    private static class RefCountedReentrantLock extends ReentrantLock {
+        private int refCount;
+
+        public RefCountedReentrantLock() {
+            this.refCount = 0;
+        }
+
+        public int increment() {
+            return ++refCount;
+        }
+
+        public int decrement() {
+            return --refCount;
+        }
+
+        public int getRefCount() { return refCount; }
+    }
+
+
+    public static class ObjectUpdateSynchronizer {
+        private final Map<String, RefCountedReentrantLock> guidLockMap = new ConcurrentHashMap<>();
+        private final ThreadLocal<List<String>>  lockedGuids = new ThreadLocal<List<String>>() {
+            @Override
+            protected List<String> initialValue() {
+                return new ArrayList<>();
+            }
+        };
+
+        public void lockObject(final List<String> guids) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("==> lockObject(): guids: {}", guids);
+            }
+
+            Collections.sort(guids);
+            for (String g : guids) {
+                lockObject(g);
+            }
+        }
+
+        private void lockObject(final String guid) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("==> lockObject(): guid: {}, guidLockMap.size: {}", guid, guidLockMap.size());
+            }
+
+            ReentrantLock lock = getOrCreateObjectLock(guid);
+            lock.lock();
+
+            lockedGuids.get().add(guid);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("<== lockObject(): guid: {}, guidLockMap.size: {}", guid, guidLockMap.size());
+            }
+        }
+
+        public void releaseLockedObjects() {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("==> releaseLockedObjects(): lockedGuids.size: {}", lockedGuids.get().size());
+            }
+
+            for (String guid : lockedGuids.get()) {
+                releaseObjectLock(guid);
+            }
+
+            lockedGuids.get().clear();
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("<== releaseLockedObjects(): lockedGuids.size: {}", lockedGuids.get().size());
+            }
+        }
+
+        private RefCountedReentrantLock getOrCreateObjectLock(String guid) {
+            synchronized (guidLockMap) {
+                RefCountedReentrantLock ret = guidLockMap.get(guid);
+                if (ret == null) {
+                    ret = new RefCountedReentrantLock();
+                    guidLockMap.put(guid, ret);
+                }
+
+                ret.increment();
+                return ret;
+            }
+        }
+
+        private RefCountedReentrantLock releaseObjectLock(String guid) {
+            synchronized (guidLockMap) {
+                RefCountedReentrantLock lock = guidLockMap.get(guid);
+                if (lock != null && lock.isHeldByCurrentThread()) {
+                    int refCount = lock.decrement();
+
+                    if (refCount == 0) {
+                        guidLockMap.remove(guid);
+                    }
+
+                    lock.unlock();
+                } else {
+                    LOG.warn("releaseLockedObjects: {} Attempting to release a lock not held by current thread.", guid);
+                }
+
+                return lock;
+            }
+        }
     }
 }

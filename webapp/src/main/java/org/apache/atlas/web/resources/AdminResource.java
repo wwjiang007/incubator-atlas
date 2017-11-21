@@ -18,13 +18,14 @@
 
 package org.apache.atlas.web.resources;
 
-import com.google.inject.Inject;
+import com.sun.jersey.multipart.FormDataParam;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasClient;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.authorize.AtlasActionTypes;
 import org.apache.atlas.authorize.AtlasResourceTypes;
 import org.apache.atlas.authorize.simple.AtlasAuthorizationUtils;
+import org.apache.atlas.discovery.SearchContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.impexp.AtlasExportRequest;
 import org.apache.atlas.model.impexp.AtlasExportResult;
@@ -35,10 +36,9 @@ import org.apache.atlas.repository.impexp.ExportService;
 import org.apache.atlas.repository.impexp.ImportService;
 import org.apache.atlas.repository.impexp.ZipSink;
 import org.apache.atlas.repository.impexp.ZipSource;
-import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.services.MetricsService;
-import org.apache.atlas.store.AtlasTypeDefStore;
-import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.util.SearchTracker;
 import org.apache.atlas.web.filters.AtlasCSRFPreventionFilter;
 import org.apache.atlas.web.service.ServiceState;
 import org.apache.atlas.web.util.Servlets;
@@ -53,22 +53,26 @@ import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
 
+import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.Consumes;
+import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
@@ -80,6 +84,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 @Path("admin")
 @Singleton
+@Service
 public class AdminResource {
     private static final Logger LOG = LoggerFactory.getLogger(AdminResource.class);
 
@@ -104,10 +109,10 @@ public class AdminResource {
 
     private final ServiceState      serviceState;
     private final MetricsService    metricsService;
-    private final AtlasTypeRegistry typeRegistry;
-    private final AtlasTypeDefStore typesDefStore;
-    private final AtlasEntityStore  entityStore;
     private static Configuration atlasProperties;
+    private final ExportService exportService;
+    private final ImportService importService;
+    private final SearchTracker activeSearches;
 
     static {
         try {
@@ -119,14 +124,13 @@ public class AdminResource {
 
     @Inject
     public AdminResource(ServiceState serviceState, MetricsService metricsService,
-                         AtlasTypeRegistry typeRegistry, AtlasTypeDefStore typeDefStore,
-                         AtlasEntityStore entityStore) {
+                         ExportService exportService, ImportService importService, SearchTracker activeSearches) {
         this.serviceState               = serviceState;
         this.metricsService             = metricsService;
-        this.typeRegistry               = typeRegistry;
-        this.typesDefStore              = typeDefStore;
-        this.entityStore                = entityStore;
-        this.importExportOperationLock  = new ReentrantLock();
+        this.exportService = exportService;
+        this.importService = importService;
+        this.activeSearches = activeSearches;
+        importExportOperationLock = new ReentrantLock();
     }
 
     /**
@@ -320,8 +324,6 @@ public class AdminResource {
         ZipSink exportSink = null;
         try {
             exportSink = new ZipSink(httpServletResponse.getOutputStream());
-            ExportService exportService = new ExportService(this.typeRegistry);
-
             AtlasExportResult result = exportService.run(exportSink, request, Servlets.getUserName(httpServletRequest),
                                                          Servlets.getHostName(httpServletRequest),
                                                          AtlasAuthorizationUtils.getRequestIpAddress(httpServletRequest));
@@ -356,10 +358,11 @@ public class AdminResource {
     @POST
     @Path("/import")
     @Produces(Servlets.JSON_MEDIA_TYPE)
-    @Consumes(Servlets.BINARY)
-    public AtlasImportResult importData(byte[] bytes) throws AtlasBaseException {
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    public AtlasImportResult importData(@FormDataParam("request") String jsonData,
+                                        @FormDataParam("data") InputStream inputStream) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
-            LOG.debug("==> AdminResource.importData(bytes.length={})", bytes.length);
+            LOG.debug("==> AdminResource.importData(jsonData={}, inputStream={})", jsonData, (inputStream != null));
         }
 
         acquireExportImportLock("import");
@@ -367,15 +370,16 @@ public class AdminResource {
         AtlasImportResult result;
 
         try {
-            AtlasImportRequest   request       = new AtlasImportRequest(Servlets.getParameterMap(httpServletRequest));
-            ByteArrayInputStream inputStream   = new ByteArrayInputStream(bytes);
-            ImportService importService = new ImportService(this.typesDefStore, this.entityStore, this.typeRegistry);
+            if (StringUtils.isEmpty(jsonData)) {
+                jsonData = "{}";
+            }
 
+            AtlasImportRequest request = AtlasType.fromJson(jsonData, AtlasImportRequest.class);
             ZipSource zipSource = new ZipSource(inputStream);
 
             result = importService.run(zipSource, request, Servlets.getUserName(httpServletRequest),
-                                       Servlets.getHostName(httpServletRequest),
-                                       AtlasAuthorizationUtils.getRequestIpAddress(httpServletRequest));
+                    Servlets.getHostName(httpServletRequest),
+                    AtlasAuthorizationUtils.getRequestIpAddress(httpServletRequest));
         } catch (Exception excp) {
             LOG.error("importData(binary) failed", excp);
 
@@ -394,7 +398,7 @@ public class AdminResource {
     @POST
     @Path("/importfile")
     @Produces(Servlets.JSON_MEDIA_TYPE)
-    public AtlasImportResult importFile() throws AtlasBaseException {
+    public AtlasImportResult importFile(String jsonData) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> AdminResource.importFile()");
         }
@@ -404,9 +408,7 @@ public class AdminResource {
         AtlasImportResult result;
 
         try {
-            AtlasImportRequest request       = new AtlasImportRequest(Servlets.getParameterMap(httpServletRequest));
-            ImportService      importService = new ImportService(this.typesDefStore, this.entityStore, this.typeRegistry);
-
+            AtlasImportRequest request = AtlasType.fromJson(jsonData, AtlasImportRequest.class);
             result = importService.run(request, Servlets.getUserName(httpServletRequest),
                                        Servlets.getHostName(httpServletRequest),
                                        AtlasAuthorizationUtils.getRequestIpAddress(httpServletRequest));
@@ -423,6 +425,21 @@ public class AdminResource {
         }
 
         return result;
+    }
+
+    @GET
+    @Path("activeSearches")
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    public Set<String> getActiveSearches() {
+        return activeSearches.getActiveSearches();
+    }
+
+    @DELETE
+    @Path("activeSearches/{id}")
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    public boolean terminateActiveSearch(@PathParam("id") String searchId) {
+        SearchContext terminate = activeSearches.terminate(searchId);
+        return null != terminate;
     }
 
     private String getEditableEntityTypes(Configuration config) {

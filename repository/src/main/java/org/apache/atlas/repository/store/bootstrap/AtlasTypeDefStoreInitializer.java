@@ -24,6 +24,7 @@ import org.apache.atlas.model.typedef.AtlasClassificationDef;
 import org.apache.atlas.model.typedef.AtlasEntityDef;
 import org.apache.atlas.model.typedef.AtlasEnumDef;
 import org.apache.atlas.model.typedef.AtlasEnumDef.AtlasEnumElementDef;
+import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasStructDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
@@ -33,12 +34,16 @@ import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.ObjectUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.codehaus.jackson.annotate.JsonAutoDetect;
 import org.codehaus.jackson.annotate.JsonIgnoreProperties;
 import org.codehaus.jackson.map.annotate.JsonSerialize;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
 
+import javax.annotation.PostConstruct;
+import javax.inject.Inject;
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlRootElement;
@@ -57,10 +62,28 @@ import static org.codehaus.jackson.annotate.JsonAutoDetect.Visibility.PUBLIC_ONL
 /**
  * Class that handles initial loading of models and patches into typedef store
  */
+@Service
 public class AtlasTypeDefStoreInitializer {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasTypeDefStoreInitializer.class);
 
-    public void initializeStore(AtlasTypeDefStore typeDefStore, AtlasTypeRegistry typeRegistry, String typesDirName) {
+    private final AtlasTypeDefStore atlasTypeDefStore;
+    private final AtlasTypeRegistry atlasTypeRegistry;
+
+    @Inject
+    public AtlasTypeDefStoreInitializer(AtlasTypeDefStore atlasTypeDefStore, AtlasTypeRegistry atlasTypeRegistry) {
+        this.atlasTypeDefStore = atlasTypeDefStore;
+        this.atlasTypeRegistry = atlasTypeRegistry;
+    }
+
+    @PostConstruct
+    public void init() {
+        String atlasHomeDir = System.getProperty("atlas.home");
+        String typesDirName = (StringUtils.isEmpty(atlasHomeDir) ? "." : atlasHomeDir) + File.separator + "models";
+
+        initializeStore(typesDirName);
+    }
+
+    private void initializeStore(String typesDirName) {
         File   typesDir     = new File(typesDirName);
         File[] typeDefFiles = typesDir.exists() ? typesDir.listFiles() : null;
 
@@ -88,11 +111,11 @@ public class AtlasTypeDefStoreInitializer {
                     continue;
                 }
 
-                AtlasTypesDef typesToCreate = getTypesToCreate(typesDef, typeRegistry);
-                AtlasTypesDef typesToUpdate = getTypesToUpdate(typesDef, typeRegistry);
+                AtlasTypesDef typesToCreate = getTypesToCreate(typesDef, atlasTypeRegistry);
+                AtlasTypesDef typesToUpdate = getTypesToUpdate(typesDef, atlasTypeRegistry);
 
                 if (!typesToCreate.isEmpty() || !typesToUpdate.isEmpty()) {
-                    typeDefStore.createUpdateTypesDef(typesToCreate, typesToUpdate);
+                    atlasTypeDefStore.createUpdateTypesDef(typesToCreate, typesToUpdate);
 
                     LOG.info("Created/Updated types defined in file {}", typeDefFile.getAbsolutePath());
                 } else {
@@ -104,7 +127,7 @@ public class AtlasTypeDefStoreInitializer {
             }
         }
 
-        applyTypePatches(typeDefStore, typeRegistry, typesDirName);
+        applyTypePatches(typesDirName);
     }
 
     public static AtlasTypesDef getTypesToCreate(AtlasTypesDef typesDef, AtlasTypeRegistry typeRegistry) {
@@ -138,6 +161,14 @@ public class AtlasTypeDefStoreInitializer {
             for (AtlasEntityDef entityDef : typesDef.getEntityDefs()) {
                 if (!typeRegistry.isRegisteredType(entityDef.getName())) {
                     typesToCreate.getEntityDefs().add(entityDef);
+                }
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(typesDef.getRelationshipDefs())) {
+            for (AtlasRelationshipDef relationshipDef : typesDef.getRelationshipDefs()) {
+                if (!typeRegistry.isRegisteredType(relationshipDef.getName())) {
+                    typesToCreate.getRelationshipDefs().add(relationshipDef);
                 }
             }
         }
@@ -212,6 +243,20 @@ public class AtlasTypeDefStoreInitializer {
             }
         }
 
+        if (CollectionUtils.isNotEmpty(typesDef.getRelationshipDefs())) {
+            for (AtlasRelationshipDef relationshipDef : typesDef.getRelationshipDefs()) {
+                AtlasRelationshipDef  oldRelationshipDef = typeRegistry.getRelationshipDefByName(relationshipDef.getName());
+
+                if (oldRelationshipDef == null) {
+                    continue;
+                }
+
+                if (updateTypeAttributes(oldRelationshipDef, relationshipDef)) {
+                    typesToUpdate.getRelationshipDefs().add(relationshipDef);
+                }
+            }
+        }
+
         return typesToUpdate;
     }
 
@@ -239,7 +284,7 @@ public class AtlasTypeDefStoreInitializer {
         return ObjectUtils.compare(newTypeVersion, oldTypeVersion) > 0;
     }
 
-    private void applyTypePatches(AtlasTypeDefStore typeDefStore, AtlasTypeRegistry typeRegistry, String typesDirName) {
+    private void applyTypePatches(String typesDirName) {
         String typePatchesDirName = typesDirName + File.separator + "patches";
         File   typePatchesDir     = new File(typePatchesDirName);
         File[] typePatchFiles     = typePatchesDir.exists() ? typePatchesDir.listFiles() : null;
@@ -254,9 +299,9 @@ public class AtlasTypeDefStoreInitializer {
         Arrays.sort(typePatchFiles);
 
         PatchHandler[] patchHandlers = new PatchHandler[] {
-                new AddAttributePatchHandler(typeDefStore, typeRegistry),
-                new UpdateTypeDefOptionsPatchHandler(typeDefStore, typeRegistry),
-                new UpdateAttributePatchHandler(typeDefStore, typeRegistry)
+                new AddAttributePatchHandler(atlasTypeDefStore, atlasTypeRegistry),
+                new UpdateTypeDefOptionsPatchHandler(atlasTypeDefStore, atlasTypeRegistry),
+                new UpdateAttributePatchHandler(atlasTypeDefStore, atlasTypeRegistry)
         };
 
         Map<String, PatchHandler> patchHandlerRegistry = new HashMap<>();

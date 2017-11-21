@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,11 +18,10 @@
 package org.apache.atlas.repository.store.graph.v1;
 
 
-import com.google.inject.Inject;
-import com.google.inject.Singleton;
 import org.apache.atlas.AtlasErrorCode;
-import org.apache.atlas.GraphTransaction;
+import org.apache.atlas.GraphTransactionInterceptor;
 import org.apache.atlas.RequestContextV1;
+import org.apache.atlas.annotation.GraphTransaction;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.impexp.AtlasImportResult;
 import org.apache.atlas.model.instance.AtlasClassification;
@@ -47,7 +46,9 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
+import javax.inject.Inject;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -61,19 +62,22 @@ import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.DE
 import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.UPDATE;
 
 
-@Singleton
+@Component
 public class AtlasEntityStoreV1 implements AtlasEntityStore {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasEntityStoreV1.class);
 
     private final DeleteHandlerV1           deleteHandler;
     private final AtlasTypeRegistry         typeRegistry;
     private final AtlasEntityChangeNotifier entityChangeNotifier;
+    private final EntityGraphMapper         entityGraphMapper;
 
     @Inject
-    public AtlasEntityStoreV1(DeleteHandlerV1 deleteHandler, AtlasTypeRegistry typeRegistry, AtlasEntityChangeNotifier entityChangeNotifier) {
+    public AtlasEntityStoreV1(DeleteHandlerV1 deleteHandler, AtlasTypeRegistry typeRegistry,
+                              AtlasEntityChangeNotifier entityChangeNotifier, EntityGraphMapper entityGraphMapper) {
         this.deleteHandler        = deleteHandler;
         this.typeRegistry         = typeRegistry;
         this.entityChangeNotifier = entityChangeNotifier;
+        this.entityGraphMapper    = entityGraphMapper;
     }
 
     @Override
@@ -119,7 +123,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
     @Override
     @GraphTransaction
     public AtlasEntityWithExtInfo getByUniqueAttributes(AtlasEntityType entityType, Map<String, Object> uniqAttributes)
-                                                                                            throws AtlasBaseException {
+            throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> getByUniqueAttribute({}, {})", entityType.getTypeName(), uniqAttributes);
         }
@@ -132,7 +136,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
 
         if (ret == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_BY_UNIQUE_ATTRIBUTE_NOT_FOUND, entityType.getTypeName(),
-                uniqAttributes.toString());
+                    uniqAttributes.toString());
         }
 
         if (LOG.isDebugEnabled()) {
@@ -143,6 +147,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
     }
 
     @Override
+    @GraphTransaction
     public EntityMutationResponse bulkImport(EntityImportStream entityStream, AtlasImportResult importResult) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> bulkImport()");
@@ -155,51 +160,94 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
         EntityMutationResponse ret = new EntityMutationResponse();
         ret.setGuidAssignments(new HashMap<String, String>());
 
-        Set<String> processedGuids          = new HashSet<>();
-        int         progressReportedAtCount = 0;
+        Set<String> processedGuids = new HashSet<>();
+        float       currentPercent = 0f;
 
-        while (entityStream.hasNext()) {
-            AtlasEntityWithExtInfo entityWithExtInfo = entityStream.getNextEntityWithExtInfo();
+        List<String> residualList = new ArrayList<>();
+        EntityImportStreamWithResidualList entityImportStreamWithResidualList = new EntityImportStreamWithResidualList(entityStream, residualList);
+        while (entityImportStreamWithResidualList.hasNext()) {
+            AtlasEntityWithExtInfo entityWithExtInfo = entityImportStreamWithResidualList.getNextEntityWithExtInfo();
             AtlasEntity            entity            = entityWithExtInfo != null ? entityWithExtInfo.getEntity() : null;
 
-            if(entity == null || processedGuids.contains(entity.getGuid())) {
+            if (entity == null || processedGuids.contains(entity.getGuid())) {
                 continue;
             }
 
             AtlasEntityStreamForImport oneEntityStream = new AtlasEntityStreamForImport(entityWithExtInfo, entityStream);
+            try {
+                EntityMutationResponse resp = createOrUpdate(oneEntityStream, false, true);
 
-            EntityMutationResponse resp = createOrUpdate(oneEntityStream, false, true);
+                if (resp.getGuidAssignments() != null) {
+                    ret.getGuidAssignments().putAll(resp.getGuidAssignments());
+                }
 
-            updateImportMetrics("entity:%s:created", resp.getCreatedEntities(), processedGuids, importResult);
-            updateImportMetrics("entity:%s:updated", resp.getUpdatedEntities(), processedGuids, importResult);
-            updateImportMetrics("entity:%s:deleted", resp.getDeletedEntities(), processedGuids, importResult);
+                currentPercent = updateImportMetrics(entityWithExtInfo, resp, importResult, processedGuids, entityStream.getPosition(),
+                                                     entityImportStreamWithResidualList.getStreamSize(), currentPercent);
 
-            if ((processedGuids.size() - progressReportedAtCount) > 1000) {
-                progressReportedAtCount = processedGuids.size();
-
-                LOG.info("bulkImport(): in progress.. number of entities imported: {}", progressReportedAtCount);
+                entityStream.onImportComplete(entity.getGuid());
+            } catch (AtlasBaseException e) {
+                if (!updateResidualList(e, residualList, entityWithExtInfo.getEntity().getGuid())) {
+                    throw e;
+                }
             }
-
-            if (resp.getGuidAssignments() != null) {
-                ret.getGuidAssignments().putAll(resp.getGuidAssignments());
-            }
-
-            entityStream.onImportComplete(entity.getGuid());
         }
 
         importResult.getProcessedEntities().addAll(processedGuids);
-        LOG.info("bulkImport(): done. Number of entities imported: {}", processedGuids.size());
+        LOG.info("bulkImport(): done. Total number of entities (including referred entities) imported: {}", processedGuids.size());
 
         return ret;
     }
 
-    private void updateImportMetrics(String prefix, List<AtlasEntityHeader> list, Set<String> processedGuids, AtlasImportResult importResult) {
+    private boolean updateResidualList(AtlasBaseException e, List<String> lineageList, String guid) {
+        if (!e.getAtlasErrorCode().getErrorCode().equals(AtlasErrorCode.INVALID_OBJECT_ID.getErrorCode())) {
+            return false;
+        }
+
+        lineageList.add(guid);
+        return true;
+    }
+
+    private float updateImportMetrics(AtlasEntityWithExtInfo currentEntity,
+                                      EntityMutationResponse resp,
+                                      AtlasImportResult importResult,
+                                      Set<String> processedGuids,
+                                      int currentIndex, int streamSize, float currentPercent) {
+        updateImportMetrics("entity:%s:created", resp.getCreatedEntities(), processedGuids, importResult);
+        updateImportMetrics("entity:%s:updated", resp.getUpdatedEntities(), processedGuids, importResult);
+        updateImportMetrics("entity:%s:deleted", resp.getDeletedEntities(), processedGuids, importResult);
+
+        String lastEntityImported = String.format("entity:last-imported:%s:[%s]:(%s)",
+                currentEntity.getEntity().getTypeName(),
+                currentIndex,
+                currentEntity.getEntity().getGuid());
+
+        return updateImportProgress(LOG, currentIndex + 1, streamSize, currentPercent, lastEntityImported);
+    }
+
+    private static float updateImportProgress(Logger log, int currentIndex, int streamSize, float currentPercent,
+                                              String additionalInfo) {
+        final double tolerance = 0.000001;
+        final int MAX_PERCENT = 100;
+
+        float percent = (float) ((currentIndex * MAX_PERCENT) / streamSize);
+        boolean updateLog = Double.compare(percent, currentPercent) > tolerance;
+        float updatedPercent = (MAX_PERCENT < streamSize) ? percent :
+                ((updateLog) ? ++currentPercent : currentPercent);
+
+        if (updateLog) {
+            log.info("bulkImport(): progress: {}% (of {}) - {}", (int) Math.ceil(percent), streamSize, additionalInfo);
+        }
+
+        return updatedPercent;
+    }
+
+    private static void updateImportMetrics(String prefix, List<AtlasEntityHeader> list, Set<String> processedGuids, AtlasImportResult importResult) {
         if (list == null) {
             return;
         }
 
         for (AtlasEntityHeader h : list) {
-            if(processedGuids.contains(h.getGuid())) {
+            if (processedGuids.contains(h.getGuid())) {
                 continue;
             }
 
@@ -208,7 +256,6 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
         }
     }
 
-    @GraphTransaction
     private EntityMutationResponse createOrUpdate(EntityStream entityStream, boolean isPartialUpdate, boolean replaceClassifications) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> createOrUpdate()");
@@ -219,8 +266,6 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
         }
 
         // Create/Update entities
-        EntityGraphMapper entityGraphMapper = new EntityGraphMapper(deleteHandler, typeRegistry);
-
         EntityMutationContext context = preCreateOrUpdate(entityStream, entityGraphMapper, isPartialUpdate);
 
         EntityMutationResponse ret = entityGraphMapper.mapAttributesAndClassifications(context, isPartialUpdate, replaceClassifications);
@@ -238,6 +283,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
     }
 
     @Override
+    @GraphTransaction
     public EntityMutationResponse createOrUpdate(EntityStream entityStream, boolean isPartialUpdate) throws AtlasBaseException {
         return createOrUpdate(entityStream, isPartialUpdate, false);
     }
@@ -267,7 +313,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
     @Override
     @GraphTransaction
     public EntityMutationResponse updateEntityAttributeByGuid(String guid, String attrName, Object attrValue)
-                                                              throws AtlasBaseException {
+            throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> updateEntityAttributeByGuid({}, {}, {})", guid, attrName, attrValue);
         }
@@ -315,6 +361,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
         return createOrUpdate(new AtlasEntityStream(updateEntity), true);
     }
 
+    @Override
     @GraphTransaction
     public EntityMutationResponse deleteById(final String guid) throws AtlasBaseException {
 
@@ -425,6 +472,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
             LOG.debug("Adding classifications={} to entity={}", classifications, guid);
         }
 
+        GraphTransactionInterceptor.lockObjectAndReleasePostCommit(guid);
         for (AtlasClassification classification : classifications) {
             validateAndNormalize(classification);
         }
@@ -432,8 +480,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
         // validate if entity, not already associated with classifications
         validateEntityAssociations(guid, classifications);
 
-        EntityGraphMapper graphMapper = new EntityGraphMapper(deleteHandler, typeRegistry);
-        graphMapper.addClassifications(new EntityMutationContext(), guid, classifications);
+        entityGraphMapper.addClassifications(new EntityMutationContext(), guid, classifications);
 
         // notify listeners on classification addition
         entityChangeNotifier.onClassificationAddedToEntity(guid, classifications);
@@ -454,12 +501,12 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "classifications(s) not specified");
         }
 
-        EntityGraphMapper         graphMapper            = new EntityGraphMapper(deleteHandler, typeRegistry);
+        GraphTransactionInterceptor.lockObjectAndReleasePostCommit(guid);
         List<AtlasClassification> updatedClassifications = new ArrayList<>();
 
         for (AtlasClassification newClassification : newClassifications) {
-            String               classificationName = newClassification.getTypeName();
-            AtlasClassification  oldClassification  = getClassification(guid, classificationName);
+            String              classificationName = newClassification.getTypeName();
+            AtlasClassification oldClassification  = getClassification(guid, classificationName);
 
             if (oldClassification == null) {
                 throw new AtlasBaseException(AtlasErrorCode.CLASSIFICATION_NOT_FOUND, classificationName);
@@ -475,7 +522,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
                 }
             }
 
-            graphMapper.updateClassification(new EntityMutationContext(), guid, oldClassification);
+            entityGraphMapper.updateClassification(new EntityMutationContext(), guid, oldClassification);
 
             updatedClassifications.add(oldClassification);
         }
@@ -498,7 +545,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
             LOG.debug("Adding classification={} to entities={}", classification, guids);
         }
 
-        EntityGraphMapper graphMapper = new EntityGraphMapper(deleteHandler, typeRegistry);
+        GraphTransactionInterceptor.lockObjectAndReleasePostCommit(guids);
 
         validateAndNormalize(classification);
 
@@ -508,7 +555,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
             // validate if entity, not already associated with classifications
             validateEntityAssociations(guid, classifications);
 
-            graphMapper.addClassifications(new EntityMutationContext(), guid, classifications);
+            entityGraphMapper.addClassifications(new EntityMutationContext(), guid, classifications);
 
             // notify listeners on classification addition
             entityChangeNotifier.onClassificationAddedToEntity(guid, classifications);
@@ -530,7 +577,8 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
             LOG.debug("Deleting classifications={} from entity={}", classificationNames, guid);
         }
 
-        EntityGraphMapper entityGraphMapper = new EntityGraphMapper(deleteHandler, typeRegistry);
+        GraphTransactionInterceptor.lockObjectAndReleasePostCommit(guid);
+
         entityGraphMapper.deleteClassifications(guid, classificationNames);
 
         // notify listeners on classification deletion
@@ -569,7 +617,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
             AtlasEntity entity = entityStream.getByGuid(guid);
 
             if (entity != null) {
-                
+
                 if (vertex != null) {
                     // entity would be null if guid is not in the stream but referenced by an entity in the stream
                     if (!isPartialUpdate) {
@@ -671,7 +719,8 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
 
     /**
      * Validate if classification is not already associated with the entities
-     * @param guid unique entity id
+     *
+     * @param guid            unique entity id
      * @param classifications list of classifications to be associated
      */
     private void validateEntityAssociations(String guid, List<AtlasClassification> classifications) throws AtlasBaseException {
@@ -682,7 +731,7 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
 
             if (CollectionUtils.isNotEmpty(entityClassifications) && entityClassifications.contains(newClassification)) {
                 throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "entity: " + guid +
-                                             ", already associated with classification: " + newClassification);
+                        ", already associated with classification: " + newClassification);
             }
         }
     }
@@ -701,4 +750,43 @@ public class AtlasEntityStoreV1 implements AtlasEntityStore {
 
         return ret;
     }
+
+    private static class EntityImportStreamWithResidualList {
+        private final EntityImportStream stream;
+        private final List<String>       residualList;
+        private       boolean            navigateResidualList;
+        private       int                currentResidualListIndex;
+
+
+        public EntityImportStreamWithResidualList(EntityImportStream stream, List<String> residualList) {
+            this.stream                   = stream;
+            this.residualList             = residualList;
+            this.navigateResidualList     = false;
+            this.currentResidualListIndex = 0;
+        }
+
+        public AtlasEntityWithExtInfo getNextEntityWithExtInfo() {
+            if (navigateResidualList == false) {
+                return stream.getNextEntityWithExtInfo();
+            } else {
+                stream.setPositionUsingEntityGuid(residualList.get(currentResidualListIndex++));
+                return stream.getNextEntityWithExtInfo();
+            }
+        }
+
+        public boolean hasNext() {
+            if (!navigateResidualList) {
+                boolean streamHasNext = stream.hasNext();
+                navigateResidualList = (streamHasNext == false);
+                return streamHasNext ? streamHasNext : (currentResidualListIndex < residualList.size());
+            } else {
+                return (currentResidualListIndex < residualList.size());
+            }
+        }
+
+        public int getStreamSize() {
+            return stream.size() + residualList.size();
+        }
+    }
+
 }

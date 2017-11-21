@@ -66,7 +66,7 @@ define(['require',
             return events;
         },
         initialize: function(options) {
-            _.extend(this, _.pick(options, 'url', 'value', 'tag', 'selectFirst', 'collection', 'typeHeaders', 'searchVent'));
+            _.extend(this, _.pick(options, 'url', 'value', 'tag', 'selectFirst', 'classificationDefCollection', 'typeHeaders', 'searchVent', 'entityDefCollection', 'enumDefCollection'));
             if (Globals.taxonomy) {
                 this.tabClass = "tab col-sm-4";
             } else {
@@ -94,8 +94,9 @@ define(['require',
             var that = this;
             require(['views/tag/TagLayoutView'], function(TagLayoutView) {
                 that.RTagLayoutView.show(new TagLayoutView({
-                    collection: that.collection,
+                    collection: that.classificationDefCollection,
                     tag: that.tag,
+                    value: that.value,
                     typeHeaders: that.typeHeaders
                 }));
             });
@@ -106,7 +107,10 @@ define(['require',
                 that.RSearchLayoutView.show(new SearchLayoutView({
                     value: that.value,
                     searchVent: that.searchVent,
-                    typeHeaders: that.typeHeaders
+                    typeHeaders: that.typeHeaders,
+                    entityDefCollection: that.entityDefCollection,
+                    enumDefCollection: that.enumDefCollection,
+                    classificationDefCollection: that.classificationDefCollection
                 }));
             });
         },

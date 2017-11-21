@@ -22,7 +22,7 @@ import com.google.common.collect.ImmutableSet;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.BaseRepositoryTest;
 import org.apache.atlas.RequestContext;
-import org.apache.atlas.TestOnlyModule;
+import org.apache.atlas.TestModules;
 import org.apache.atlas.TestUtils;
 import org.apache.atlas.discovery.graph.GraphBackedDiscoveryService;
 import org.apache.atlas.query.QueryParams;
@@ -62,7 +62,7 @@ import static org.apache.atlas.typesystem.types.utils.TypesUtil.createRequiredAt
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNotNull;
 
-@Guice(modules = TestOnlyModule.class)
+@Guice(modules = TestModules.TestOnlyModule.class)
 public class GraphBackedDiscoveryServiceTest extends BaseRepositoryTest {
 
     @Inject
@@ -227,6 +227,32 @@ public class GraphBackedDiscoveryServiceTest extends BaseRepositoryTest {
         assertEquals(rows.length(), 1);
     }
 
+    
+    /*
+     * https://issues.apache.org/jira/browse/ATLAS-1875
+     */
+    @Test
+    public void testGremlinSearchReturnVertexId() throws Exception {
+       List<Map<String,String>> gremlinResults = discoveryService.searchByGremlin("g.V.range(0,0).collect()");
+       assertEquals(gremlinResults.size(), 1);
+       Map<String, String> properties = gremlinResults.get(0);
+       Assert.assertTrue(properties.containsKey(GraphBackedDiscoveryService.GREMLIN_ID_KEY));
+    }
+    
+    /*
+     * https://issues.apache.org/jira/browse/ATLAS-1875
+     */
+    @Test
+    public void testGremlinSearchReturnEdgeIds() throws Exception {
+       List<Map<String,String>> gremlinResults = discoveryService.searchByGremlin("g.E.range(0,0).collect()");
+       assertEquals(gremlinResults.size(), 1);
+       Map<String, String> properties = gremlinResults.get(0);
+       Assert.assertTrue(properties.containsKey(GraphBackedDiscoveryService.GREMLIN_INVERTEX_KEY));
+       Assert.assertTrue(properties.containsKey(GraphBackedDiscoveryService.GREMLIN_OUTVERTEX_KEY));
+       Assert.assertTrue(properties.containsKey(GraphBackedDiscoveryService.GREMLIN_LABEL_KEY));
+    }
+
+
     @Test
     public void testSearchByDSLReturnsEntity() throws Exception {
         String dslQuery = "from Department";
@@ -264,6 +290,9 @@ public class GraphBackedDiscoveryServiceTest extends BaseRepositoryTest {
                 {"hive_db where hive_db.name like \"R???rt?*\" or hive_db.name like \"S?l?s\" or hive_db.name like\"Log*\"", 3},
                 {"hive_db where hive_db.name like \"R???rt?*\" and hive_db.name like \"S?l?s\" and hive_db.name like\"Log*\"", 0},
                 {"hive_table where name like 'sales*', db where name like 'Sa?es'", 1},
+                {"hive_table where name like 'sales*' and db.name like 'Sa?es'", 1},
+                {"hive_table where db.name like \"Sa*\"", 4},
+                {"hive_table where db.name like \"Sa*\" and name like \"*dim\"", 3},
         };
     }
 

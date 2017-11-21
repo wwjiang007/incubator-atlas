@@ -46,6 +46,7 @@
     position: relative;
     padding: 15px;
     max-height: 400px;
+    min-height: 70px;
     overflow: auto;
 }
 
@@ -75,7 +76,7 @@
     border-color: $color_jungle_green_approx;
     border-bottom-style: solid;
     box-shadow: none;
-    padding: 20px 30px;
+    padding: 20px 15px;
     background-color: transparent;
     text-align: left;
     font-weight: 800;
@@ -88,7 +89,7 @@
     border-color: $color_gallery_approx;
     color: #333333;
     font-weight: 100;
-    padding: 15px 30px;
+    padding: 10px 15px;
 }
 
 .backgrid-paginator ul > li > a:hover,
@@ -264,4 +265,42 @@
 .advancedInfo {
     margin-left: 5px;
     cursor: pointer;
+}
+
+.query-builder .rule-container .rule-value-container {
+    display: inline-block !important;
+}
+
+.rules-group-header .btn-group.pull-right.group-actions {
+    float: left !important;
+}
+
+.query-builder .rules-list>:first-child::before {
+    top: -8px;
+}
+
+.query-builder .rules-group-header .btn-group.group-conditions label {
+    display: none;
+}
+
+.query-builder .rule-value-container input {
+    padding: 6px 12px !important;
+}
+
+div.columnmanager-visibilitycontrol {
+    width: auto;
+    margin-bottom: 5px;
+}
+
+.columnmanager-dropdown-container > li > span.column-label {
+    width: auto;
+}
+
+div.columnmanager-dropdown-container.open {
+    overflow: auto;
+}
+
+.columnmanager-visibilitycontrol.open .btn-atlasAction {
+    background-color: #37bb9b;
+    color: #fff;
 }

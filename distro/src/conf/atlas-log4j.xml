@@ -59,6 +59,23 @@
         </layout>
     </appender>
 
+    <!-- Uncomment the following for perf logs -->
+    <!--
+    <appender name="perf_appender" class="org.apache.log4j.DailyRollingFileAppender">
+        <param name="file" value="${atlas.log.dir}/atlas_perf.log" />
+        <param name="datePattern" value="'.'yyyy-MM-dd" />
+        <param name="append" value="true" />
+        <layout class="org.apache.log4j.PatternLayout">
+            <param name="ConversionPattern" value="%d|%t|%m%n" />
+        </layout>
+    </appender>
+
+    <logger name="org.apache.atlas.perf" additivity="false">
+        <level value="debug" />
+        <appender-ref ref="perf_appender" />
+    </logger>
+    -->
+
     <logger name="org.apache.atlas" additivity="false">
         <level value="info"/>
         <appender-ref ref="FILE"/>
@@ -67,6 +84,21 @@
     <logger name="com.thinkaurelius.titan" additivity="false">
         <level value="info"/>
         <appender-ref ref="FILE"/>
+    </logger>
+
+    <logger name="org.springframework" additivity="false">
+        <level value="warn"/>
+        <appender-ref ref="console"/>
+    </logger>
+
+    <logger name="org.eclipse" additivity="false">
+        <level value="warn"/>
+        <appender-ref ref="console"/>
+    </logger>
+
+    <logger name="com.sun.jersey" additivity="false">
+        <level value="warn"/>
+        <appender-ref ref="console"/>
     </logger>
 
     <!-- to avoid logs - The configuration log.flush.interval.messages = 1 was supplied but isn't a known config -->

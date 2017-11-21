@@ -26,6 +26,7 @@ import org.apache.atlas.web.security.AtlasAuthenticationProvider;
 import org.apache.atlas.web.util.Servlets;
 import org.apache.commons.collections.iterators.IteratorEnumeration;
 import org.apache.commons.configuration.Configuration;
+import org.apache.commons.configuration.ConfigurationConverter;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.security.SecurityUtil;
 import org.apache.hadoop.security.UserGroupInformation;
@@ -51,6 +52,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.authentication.WebAuthenticationDetails;
+import org.springframework.stereotype.Component;
 
 import javax.servlet.FilterChain;
 import javax.servlet.FilterConfig;
@@ -73,11 +75,13 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+
 /**
  * This enforces authentication as part of the filter before processing the request.
  * todo: Subclass of {@link org.apache.hadoop.security.authentication.server.AuthenticationFilter}.
  */
 
+@Component
 public class AtlasAuthenticationFilter extends AuthenticationFilter {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasAuthenticationFilter.class);
     static final String PREFIX = "atlas.authentication.method";
@@ -88,7 +92,8 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
     private boolean isInitializedByTomcat;
     private Set<Pattern> browserUserAgents;
     private boolean supportKeyTabBrowserLogin = false;
-
+    private Configuration configuration;
+    private Properties headerProperties;
     public AtlasAuthenticationFilter() {
         try {
             LOG.info("AtlasAuthenticationFilter initialization started");
@@ -110,8 +115,16 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
     public void init(FilterConfig filterConfig) throws ServletException {
         LOG.info("AtlasAuthenticationFilter initialization started");
         final FilterConfig globalConf = filterConfig;
-
         final Map<String, String> params = new HashMap<>();
+        try {
+            configuration = ApplicationProperties.get();
+        } catch (Exception e) {
+            throw new ServletException(e);
+        }
+
+        if (configuration != null) {
+            headerProperties = ConfigurationConverter.getProperties(configuration.subset("atlas.headers"));
+        }
 
         FilterConfig filterConfig1 = new FilterConfig() {
             @Override
@@ -145,7 +158,6 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
         optionsServlet = new HttpServlet() {
         };
         optionsServlet.init();
-
     }
 
 
@@ -174,7 +186,6 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
 
     @Override
     protected Properties getConfiguration(String configPrefix, FilterConfig filterConfig) throws ServletException {
-        Configuration configuration;
         try {
             configuration = ApplicationProperties.get();
         } catch (Exception e) {
@@ -306,9 +317,15 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
         try {
             Authentication existingAuth = SecurityContextHolder.getContext().getAuthentication();
             HttpServletResponse httpResponse = (HttpServletResponse) response;
-
             AtlasResponseRequestWrapper responseWrapper = new AtlasResponseRequestWrapper(httpResponse);
             responseWrapper.setHeader("X-Frame-Options", "DENY");
+
+            if (headerProperties != null) {
+                for (String headerKey : headerProperties.stringPropertyNames()) {
+                    String headerValue = headerProperties.getProperty(headerKey);
+                    responseWrapper.setHeader(headerKey, headerValue);
+                }
+            }
 
             if (existingAuth == null) {
                 String authHeader = httpRequest.getHeader("Authorization");

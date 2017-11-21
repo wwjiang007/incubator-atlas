@@ -21,7 +21,7 @@ import com.sun.jersey.api.client.Client;
 import com.sun.jersey.api.client.ClientHandlerException;
 import com.sun.jersey.api.client.ClientResponse;
 import com.sun.jersey.api.client.WebResource;
-
+import org.apache.atlas.model.legacy.EntityResult;
 import org.apache.atlas.typesystem.Referenceable;
 import org.apache.atlas.typesystem.json.InstanceSerialization;
 import org.apache.commons.configuration.Configuration;
@@ -33,30 +33,31 @@ import org.mockito.MockitoAnnotations;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+import javax.ws.rs.core.Response;
+import javax.ws.rs.core.UriBuilder;
 import java.net.ConnectException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.List;
 
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
-
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNull;
+import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
 public class AtlasClientTest {
 
     @Mock
     private WebResource service;
+    @Mock
+    private WebResource.Builder resourceBuilderMock;
 
     @Mock
     private Configuration configuration;
@@ -94,7 +95,7 @@ public class AtlasClientTest {
         ClientResponse response = mock(ClientResponse.class);
         when(response.getStatus()).thenReturn(Response.Status.CREATED.getStatusCode());
 
-        JSONObject jsonResponse = new JSONObject(new AtlasClient.EntityResult(Arrays.asList("id"), null, null).toString());
+        JSONObject jsonResponse = new JSONObject(new EntityResult(Arrays.asList("id"), null, null).toString());
         when(response.getEntity(String.class)).thenReturn(jsonResponse.toString());
         when(response.getLength()).thenReturn(jsonResponse.length());
         String entityJson = InstanceSerialization.toJson(new Referenceable("type"), true);
@@ -431,11 +432,11 @@ public class AtlasClientTest {
     }
 
     private WebResource.Builder getBuilder(WebResource resourceObject) {
-        WebResource.Builder builder = mock(WebResource.Builder.class);
+        when(resourceObject.getRequestBuilder()).thenReturn(resourceBuilderMock);
         when(resourceObject.path(anyString())).thenReturn(resourceObject);
-        when(resourceObject.accept(AtlasBaseClient.JSON_MEDIA_TYPE)).thenReturn(builder);
-        when(builder.type(AtlasBaseClient.JSON_MEDIA_TYPE)).thenReturn(builder);
-        return builder;
+        when(resourceBuilderMock.accept(AtlasBaseClient.JSON_MEDIA_TYPE)).thenReturn(resourceBuilderMock);
+        when(resourceBuilderMock.type(AtlasBaseClient.JSON_MEDIA_TYPE)).thenReturn(resourceBuilderMock);
+        return resourceBuilderMock;
     }
 
     private void setupRetryParams() {

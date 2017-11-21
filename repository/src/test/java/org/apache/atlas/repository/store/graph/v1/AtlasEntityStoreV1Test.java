@@ -20,8 +20,8 @@ package org.apache.atlas.repository.store.graph.v1;
 import com.google.common.collect.ImmutableSet;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.TestModules;
 import org.apache.atlas.RequestContextV1;
-import org.apache.atlas.TestOnlyModule;
 import org.apache.atlas.TestUtils;
 import org.apache.atlas.TestUtilsV2;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -77,13 +77,14 @@ import static org.apache.atlas.TestUtils.COLUMNS_ATTR_NAME;
 import static org.apache.atlas.TestUtils.COLUMN_TYPE;
 import static org.apache.atlas.TestUtils.NAME;
 import static org.apache.atlas.TestUtils.randomString;
+import static org.apache.atlas.TestUtilsV2.STORAGE_DESC_TYPE;
 import static org.apache.atlas.TestUtilsV2.TABLE_TYPE;
 import static org.mockito.Mockito.mock;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
-@Guice(modules = TestOnlyModule.class)
+@Guice(modules = TestModules.TestOnlyModule.class)
 public class AtlasEntityStoreV1Test {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasEntityStoreV1Test.class);
 
@@ -104,8 +105,11 @@ public class AtlasEntityStoreV1Test {
     private AtlasEntitiesWithExtInfo deptEntity;
     private AtlasEntityWithExtInfo   dbEntity;
     private AtlasEntityWithExtInfo   tblEntity;
+    private AtlasEntityWithExtInfo   primitiveEntity;
 
     AtlasEntityChangeNotifier mockChangeNotifier = mock(AtlasEntityChangeNotifier.class);
+    @Inject
+    private EntityGraphMapper graphMapper;
 
 
     @BeforeClass
@@ -128,6 +132,14 @@ public class AtlasEntityStoreV1Test {
         deptEntity = TestUtilsV2.createDeptEg2();
         dbEntity   = TestUtilsV2.createDBEntityV2();
         tblEntity  = TestUtilsV2.createTableEntityV2(dbEntity.getEntity());
+
+        AtlasTypesDef typesDef11 = new  AtlasTypesDef();
+        List primitiveEntityDef = new ArrayList<AtlasEntityDef>();
+        primitiveEntityDef.add(TestUtilsV2.createPrimitiveEntityDef());
+        typesDef11.setEntityDefs(primitiveEntityDef);
+        typeDefStore.createTypesDef( typesDef11 );
+
+        primitiveEntity = TestUtilsV2.createprimitiveEntityV2();
     }
 
     @AfterClass
@@ -137,9 +149,42 @@ public class AtlasEntityStoreV1Test {
 
     @BeforeTest
     public void init() throws Exception {
-        entityStore = new AtlasEntityStoreV1(deleteHandler, typeRegistry, mockChangeNotifier);
+        entityStore = new AtlasEntityStoreV1(deleteHandler, typeRegistry, mockChangeNotifier, graphMapper);
         RequestContextV1.clear();
     }
+
+    @Test
+    public void testDefaultValueForPrimitiveTypes() throws Exception  {
+
+        init();
+
+        EntityMutationResponse response = entityStore.createOrUpdate(new AtlasEntityStream(primitiveEntity), false);
+        List<AtlasEntityHeader> entitiesCreatedResponse = response.getEntitiesByOperation(EntityOperation.CREATE);
+        final Map<EntityOperation, List<AtlasEntityHeader>> entitiesMutated = response.getMutatedEntities();
+        List<AtlasEntityHeader> entitiesCreatedwithdefault = entitiesMutated.get(EntityOperation.CREATE);
+
+        AtlasEntity entityCreated   = getEntityFromStore(entitiesCreatedResponse.get(0));
+
+
+        Map attributesMap = entityCreated.getAttributes();
+        String description = (String) attributesMap.get("description");
+        String check = (String) attributesMap.get("check");
+        String   sourceCode =  (String) attributesMap.get("sourcecode");
+        float   diskUsage =  (float) attributesMap.get("diskUsage");
+        boolean   isstoreUse =  (boolean) attributesMap.get("isstoreUse");
+        int cost = (int)attributesMap.get("Cost");
+
+
+        assertEquals(description,"test");
+        assertEquals(check,"check");
+
+        //defaultValue
+        assertEquals(diskUsage,70.5f);
+        assertEquals(isstoreUse,true);
+        assertEquals(sourceCode,"Hello World");
+        assertEquals(cost,30);
+    }
+
 
     @Test
     public void testCreate() throws Exception {

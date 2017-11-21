@@ -35,10 +35,14 @@ import org.apache.atlas.type.AtlasStructType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.type.AtlasType;
 import org.apache.commons.collections.MapUtils;
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Date;
+import java.util.Iterator;
+import java.util.Map;
 
 /**
  * Utility methods for Graph.
@@ -49,6 +53,7 @@ public class AtlasGraphUtilsV1 {
     public static final String PROPERTY_PREFIX      = Constants.INTERNAL_PROPERTY_KEY_PREFIX + "type.";
     public static final String SUPERTYPE_EDGE_LABEL = PROPERTY_PREFIX + ".supertype";
     public static final String VERTEX_TYPE          = "typeSystem";
+    public static final String RELATIONSHIPTYPE_EDGE_LABEL = PROPERTY_PREFIX + ".relationshipType";
 
 
     public static String getTypeDefPropertyKey(AtlasBaseTypeDef typeDef) {
@@ -71,8 +76,8 @@ public class AtlasGraphUtilsV1 {
         return vertex.getProperty(Constants.GUID_PROPERTY_KEY, String.class);
     }
 
-    public static String getTypeName(AtlasVertex instanceVertex) {
-        return instanceVertex.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
+    public static String getTypeName(AtlasElement element) {
+        return element.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
     }
 
     public static String getEdgeLabel(String fromNode, String toNode) {
@@ -89,13 +94,17 @@ public class AtlasGraphUtilsV1 {
 
     public static String getQualifiedAttributePropertyKey(AtlasStructType fromType, String attributeName) throws AtlasBaseException {
         switch (fromType.getTypeCategory()) {
-         case STRUCT:
          case ENTITY:
+         case STRUCT:
          case CLASSIFICATION:
              return fromType.getQualifiedAttributeName(attributeName);
         default:
             throw new AtlasBaseException(AtlasErrorCode.UNKNOWN_TYPE, fromType.getTypeCategory().name());
         }
+    }
+
+    public static boolean isEntityVertex(AtlasVertex vertex) {
+        return StringUtils.isNotEmpty(getIdFromVertex(vertex)) && StringUtils.isNotEmpty(getTypeName(vertex));
     }
 
     public static boolean isReference(AtlasType type) {
@@ -234,6 +243,18 @@ public class AtlasGraphUtilsV1 {
         return vertex;
     }
 
+    public static String getTypeNameFromGuid(String guid) {
+        String ret = null;
+
+        if (StringUtils.isNotEmpty(guid)) {
+            AtlasVertex vertex = AtlasGraphUtilsV1.findByGuid(guid);
+
+            ret = (vertex != null) ? AtlasGraphUtilsV1.getTypeName(vertex) : null;
+        }
+
+        return ret;
+    }
+
     public static boolean typeHasInstanceVertex(String typeName) throws AtlasBaseException {
         AtlasGraphQuery query = AtlasGraphProvider.getGraphInstance()
                 .query()
@@ -274,6 +295,22 @@ public class AtlasGraphUtilsV1 {
         AtlasVertex vertex = results.hasNext() ? results.next() : null;
 
         return vertex;
+    }
+
+    public static boolean relationshipTypeHasInstanceEdges(String typeName) throws AtlasBaseException {
+        AtlasGraphQuery query = AtlasGraphProvider.getGraphInstance()
+                .query()
+                .has(Constants.TYPE_NAME_PROPERTY_KEY, AtlasGraphQuery.ComparisionOperator.EQUAL, typeName);
+
+        Iterator<AtlasEdge> results = query.edges().iterator();
+
+        boolean hasInstanceEdges = results != null && results.hasNext();
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("relationshipType {} has instance edges {}", typeName, hasInstanceEdges);
+        }
+
+        return hasInstanceEdges;
     }
 
     private static String toString(AtlasElement element) {

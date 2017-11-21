@@ -16,6 +16,7 @@
  * limitations under the License.
  */
 package org.apache.atlas.notification;
+import org.apache.kafka.common.TopicPartition;
 
 /**
  * Abstract notification consumer.
@@ -25,10 +26,9 @@ public abstract class AbstractNotificationConsumer<T> implements NotificationCon
     /**
      * Deserializer used to deserialize notification messages for this consumer.
      */
-    private final MessageDeserializer<T> deserializer;
+    protected final MessageDeserializer<T> deserializer;
 
 
-    // ----- Constructors ----------------------------------------------------
 
     /**
      * Construct an AbstractNotificationConsumer.
@@ -40,34 +40,6 @@ public abstract class AbstractNotificationConsumer<T> implements NotificationCon
     }
 
 
-    // ----- AbstractNotificationConsumer -------------------------------------
 
-    /**
-     * Get the next notification as a string.
-     *
-     * @return the next notification in string form
-     */
-    protected abstract String getNext();
-
-    /**
-     * Get the next notification as a string without advancing.
-     *
-     * @return the next notification in string form
-     */
-    protected abstract String peekMessage();
-
-
-    // ----- NotificationConsumer ---------------------------------------------
-
-    @Override
-    public T next() {
-        return deserializer.deserialize(getNext());
-    }
-
-    @Override
-    public T peek() {
-        return deserializer.deserialize(peekMessage());
-    }
-
-    public abstract void commit();
+    public abstract void commit(TopicPartition partition, long offset);
 }

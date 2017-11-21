@@ -42,16 +42,16 @@ define([
             '*actions': 'defaultAction'
         },
         initialize: function(options) {
-            _.extend(this, _.pick(options, 'entityDefCollection', 'typeHeaders', 'enumDefCollection'));
+            _.extend(this, _.pick(options, 'entityDefCollection', 'typeHeaders', 'enumDefCollection', 'classificationDefCollection'));
             this.showRegions();
             this.bindCommonEvents();
             this.listenTo(this, 'route', this.postRouteExecute, this);
-            this.tagCollection = new VTagList();
             this.searchVent = new Backbone.Wreqr.EventAggregator();
             this.preFetchedCollectionLists = {
                 'entityDefCollection': this.entityDefCollection,
                 'typeHeaders': this.typeHeaders,
-                'enumDefCollection': this.enumDefCollection
+                'enumDefCollection': this.enumDefCollection,
+                'classificationDefCollection': this.classificationDefCollection
             }
         },
         bindCommonEvents: function() {
@@ -124,8 +124,7 @@ define([
                     if (!App.rSideNav.currentView) {
                         App.rSideNav.show(new SideNavLayoutView(
                             _.extend({
-                                'url': url,
-                                'collection': that.tagCollection
+                                'url': url
                             }, that.preFetchedCollectionLists)
                         ));
                     } else {
@@ -157,9 +156,7 @@ define([
                     App.rNHeader.show(new Header());
                     if (!App.rSideNav.currentView) {
                         App.rSideNav.show(new SideNavLayoutView(
-                            _.extend({
-                                'collection': that.tagCollection,
-                            }, that.preFetchedCollectionLists)
+                            _.extend({}, that.preFetchedCollectionLists)
                         ));
                     } else {
                         App.rSideNav.currentView.selectTab();
@@ -196,8 +193,7 @@ define([
                     }
                     App.rSideNav.show(new SideNavLayoutView(
                         _.extend({
-                            'tag': tagName,
-                            'collection': that.tagCollection
+                            'tag': tagName
                         }, that.preFetchedCollectionLists)
                     ));
                 } else {
@@ -221,8 +217,7 @@ define([
                     }
                     App.rNContent.show(new TagDetailLayoutView(
                         _.extend({
-                            'tag': tagName,
-                            'collection': that.tagCollection,
+                            'tag': tagName
                         }, that.preFetchedCollectionLists)
                     ));
                 }
@@ -241,7 +236,7 @@ define([
                 if (!App.rSideNav.currentView) {
                     App.rSideNav.show(new SideNavLayoutView(
                         _.extend({
-                            'collection': that.tagCollection
+                            'searchVent': that.searchVent
                         }, that.preFetchedCollectionLists)
                     ));
                 } else {
@@ -256,7 +251,8 @@ define([
                     App.rNContent.show(new SearchDetailLayoutView(
                         _.extend({
                             'value': paramObj,
-                            'initialView': true
+                            'initialView': true,
+                            'searchVent': that.searchVent
                         }, that.preFetchedCollectionLists)
                     ));
                 } else {
@@ -279,7 +275,6 @@ define([
                     App.rSideNav.show(new SideNavLayoutView(
                         _.extend({
                             'value': paramObj,
-                            'collection': that.tagCollection,
                             'searchVent': that.searchVent
                         }, that.preFetchedCollectionLists)
                     ));

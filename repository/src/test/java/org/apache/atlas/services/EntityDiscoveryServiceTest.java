@@ -17,7 +17,7 @@
  */
 package org.apache.atlas.services;
 
-import org.apache.atlas.TestOnlyModule;
+import org.apache.atlas.TestModules;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.typedef.AtlasEntityDef;
@@ -28,12 +28,13 @@ import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Guice;
 import org.testng.annotations.Test;
 
+import javax.inject.Inject;
 
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertNotNull;
+import static org.testng.Assert.assertTrue;
 
-@Guice(modules = TestOnlyModule.class)
+@Guice(modules = TestModules.TestOnlyModule.class)
 public class EntityDiscoveryServiceTest {
 
     private final String TEST_TYPE                = "test";
@@ -50,6 +51,9 @@ public class EntityDiscoveryServiceTest {
     AtlasEntityDef typeWithSubTypes = null;
 
     private final int maxTypesCountInIdxQuery = 10;
+
+    @Inject
+    EntityDiscoveryService discoveryService;
 
 
     @BeforeClass
@@ -101,10 +105,11 @@ public class EntityDiscoveryServiceTest {
     public void getSubTypeForTypeWithSubTypes_ReturnsOrClause() throws Exception {
         String s = invokeGetSubTypesForType(TEST_TYPE_WITH_SUB_TYPES, maxTypesCountInIdxQuery);
 
-        assertTrue(s.startsWith("(" + TEST_TYPE_WITH_SUB_TYPES));
-        assertTrue(s.contains(" " + TEST_TYPE1));
-        assertTrue(s.contains(" " + TEST_TYPE2));
-        assertTrue(s.contains(" " + TEST_TYPE3));
+        assertTrue(s.startsWith("("));
+        assertTrue(s.contains(TEST_TYPE_WITH_SUB_TYPES));
+        assertTrue(s.contains(TEST_TYPE1));
+        assertTrue(s.contains(TEST_TYPE2));
+        assertTrue(s.contains(TEST_TYPE3));
         assertTrue(s.endsWith(")"));
     }
 

@@ -16,15 +16,15 @@
  */
 package org.apache.atlas.web.filters;
 
-import java.io.IOException;
+import org.mockito.Mockito;
+import org.testng.annotations.Test;
 
 import javax.servlet.FilterChain;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-
-import org.junit.Test;
-import org.mockito.Mockito;
+import java.io.IOException;
+import java.io.PrintWriter;
 
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
@@ -43,13 +43,15 @@ public class AtlasCSRFPreventionFilterTest {
 
 		// Objects to verify interactions based on request
 		HttpServletResponse mockRes = Mockito.mock(HttpServletResponse.class);
+		PrintWriter mockWriter = Mockito.mock(PrintWriter.class);
+		Mockito.when(mockRes.getWriter()).thenReturn(mockWriter);
 		FilterChain mockChain = Mockito.mock(FilterChain.class);
 
 		// Object under test
 		AtlasCSRFPreventionFilter filter = new AtlasCSRFPreventionFilter();
 		filter.doFilter(mockReq, mockRes, mockChain);
 
-		verify(mockRes, atLeastOnce()).sendError(HttpServletResponse.SC_BAD_REQUEST, EXPECTED_MESSAGE);
+		verify(mockRes, atLeastOnce()).setStatus(HttpServletResponse.SC_BAD_REQUEST);
 		Mockito.verifyZeroInteractions(mockChain);
 	}
 	
@@ -97,6 +99,8 @@ public class AtlasCSRFPreventionFilterTest {
 
 		// Objects to verify interactions based on request
 		HttpServletResponse mockRes = Mockito.mock(HttpServletResponse.class);
+		PrintWriter mockWriter = Mockito.mock(PrintWriter.class);
+		Mockito.when(mockRes.getWriter()).thenReturn(mockWriter);
 		FilterChain mockChain = Mockito.mock(FilterChain.class);
 
 		// Object under test
@@ -138,6 +142,9 @@ public class AtlasCSRFPreventionFilterTest {
 
 		// Objects to verify interactions based on request
 		HttpServletResponse mockRes = Mockito.mock(HttpServletResponse.class);
+		PrintWriter mockWriter = Mockito.mock(PrintWriter.class);
+		Mockito.when(mockRes.getWriter()).thenReturn(mockWriter);
+
 		FilterChain mockChain = Mockito.mock(FilterChain.class);
 
 		// Object under test

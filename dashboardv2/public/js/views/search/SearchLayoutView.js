@@ -22,7 +22,8 @@ define(['require',
     'utils/Utils',
     'utils/UrlLinks',
     'utils/Globals',
-], function(require, Backbone, SearchLayoutViewTmpl, Utils, UrlLinks, Globals) {
+    'utils/CommonViewFunction'
+], function(require, Backbone, SearchLayoutViewTmpl, Utils, UrlLinks, Globals, CommonViewFunction) {
     'use strict';
 
     var SearchLayoutView = Backbone.Marionette.LayoutView.extend(
@@ -44,7 +45,9 @@ define(['require',
                 typeLov: '[data-id="typeLOV"]',
                 tagLov: '[data-id="tagLOV"]',
                 refreshBtn: '[data-id="refreshBtn"]',
-                advancedInfoBtn: '[data-id="advancedInfo"]'
+                advancedInfoBtn: '[data-id="advancedInfo"]',
+                typeAttrFilter: '[data-id="typeAttrFilter"]',
+                tagAttrFilter: '[data-id="tagAttrFilter"]'
             },
 
             /** ui events hash */
@@ -65,6 +68,12 @@ define(['require',
                 events["change " + this.ui.tagLov] = 'checkForButtonVisiblity';
                 events["click " + this.ui.refreshBtn] = 'onRefreshButton';
                 events["click " + this.ui.advancedInfoBtn] = 'advancedInfo';
+                events["click " + this.ui.typeAttrFilter] = function() {
+                    this.openAttrFilter('type');
+                };
+                events["click " + this.ui.tagAttrFilter] = function() {
+                    this.openAttrFilter('tag');
+                };
                 return events;
             },
             /**
@@ -72,7 +81,7 @@ define(['require',
              * @constructs
              */
             initialize: function(options) {
-                _.extend(this, _.pick(options, 'value', 'typeHeaders', 'searchVent'));
+                _.extend(this, _.pick(options, 'value', 'typeHeaders', 'searchVent', 'entityDefCollection', 'enumDefCollection', 'classificationDefCollection'));
                 this.type = "basic";
                 var param = Utils.getUrlState.getQueryParams();
                 this.query = {
@@ -83,9 +92,14 @@ define(['require',
                     basic: {
                         query: null,
                         type: null,
+                        typeFilter: null,
+                        tagFilter: null,
                         tag: null
                     }
                 };
+                if (!this.value) {
+                    this.value = {};
+                }
                 this.dsl = false;
                 if (param && param.searchType) {
                     this.type = param.searchType;
@@ -108,7 +122,88 @@ define(['require',
                     this.checkForButtonVisiblity();
                 }, this);
             },
-            checkForButtonVisiblity: function() {
+            makeFilterButtonActive: function(filtertypeParam) {
+                var filtertype = ['entityFilters', 'tagFilters'],
+                    that = this;
+                if (filtertypeParam) {
+                    if (_.isArray(filtertypeParam)) {
+                        filtertype = filtertypeParam;
+                    } else if (_.isString(filtertypeParam)) {
+                        filtertype = [filtertypeParam];
+                    }
+                }
+                var typeCheck = function(filterQueryObj, type) {
+                    var filterObj = filterQueryObj[type];
+                    if (that.value.type) {
+                        if (filterObj && filterObj.length) {
+                            that.ui.typeAttrFilter.addClass('active');
+                        } else {
+                            filterQueryObj[type] = null;
+                            that.value[type] = null;
+                            that.ui.typeAttrFilter.removeClass('active');
+                        }
+                        that.ui.typeAttrFilter.prop('disabled', false);
+                    } else {
+                        filterQueryObj[type] = null;
+                        that.value[type] = null;
+                        that.ui.typeAttrFilter.removeClass('active');
+                        that.ui.typeAttrFilter.prop('disabled', true);
+                    }
+
+                }
+                var tagCheck = function(filterQueryObj, type) {
+                    var filterObj = filterQueryObj[type];
+                    if (that.value.tag) {
+                        that.ui.tagAttrFilter.prop('disabled', false);
+                        if (filterObj && filterObj.length) {
+                            that.ui.tagAttrFilter.addClass('active');
+                        } else {
+                            filterQueryObj[type] = null;
+                            that.value[type] = null;
+                            that.ui.tagAttrFilter.removeClass('active');
+                        }
+                    } else {
+                        filterQueryObj[type] = null;
+                        that.value[type] = null;
+                        that.ui.tagAttrFilter.removeClass('active');
+                        that.ui.tagAttrFilter.prop('disabled', true);
+                    }
+                }
+                _.each(filtertype, function(type) {
+                    var filterObj = that.query[that.type][type],
+                        filterQueryObj = that.query[that.type];
+                    if (type == "entityFilters") {
+                        typeCheck(filterQueryObj, type)
+                    }
+                    if (type == "tagFilters") {
+                        tagCheck(filterQueryObj, type)
+                    }
+                });
+            },
+            checkForButtonVisiblity: function(e) {
+                if (this.type == "basic" && e && e.currentTarget) {
+                    var $el = $(e.currentTarget),
+                        isTagEl = $el.data('id') == "tagLOV" ? true : false;
+                    if (e.type == "change" && $el.select2('data')) {
+                        var value = $el.val(),
+                            key = (isTagEl ? 'tag' : 'type'),
+                            filterType = (isTagEl ? 'tagFilters' : 'entityFilters'),
+                            value = value.length ? value : null;
+                        if (this.value) {
+                            if (this.value[key] !== value || (!value && !this.value[key]) || (!this.value[filterType])) {
+                                var temp = {};
+                                temp[key] = value;
+                                _.extend(this.value, temp);
+                                this.query[this.type][filterType] = null;
+                                this.value[filterType] = null;
+                                this.makeFilterButtonActive(filterType);
+                            }
+                        } else {
+                            this.ui.tagAttrFilter.prop('disabled', true);
+                            this.ui.typeAttrFilter.prop('disabled', true);
+                        }
+                    }
+                }
                 var that = this,
                     value = this.ui.searchInput.val() || this.ui.typeLov.val();
                 if (!this.dsl && !value) {
@@ -135,26 +230,31 @@ define(['require',
                     placeholder: "Select",
                     allowClear: true
                 });
-                this.bindEvents();
-                this.checkForButtonVisiblity();
             },
             updateQueryObject: function(param) {
                 if (param && param.searchType) {
                     this.type = param.searchType;
                 }
-                _.extend(this.query[this.type], {
+                _.extend(this.query[this.type],
+                    (this.type == "dsl" ? {
+                        query: null,
+                        type: null
+                    } : {
                         query: null,
                         type: null,
-                        tag: null
-                    },
-                    param);
+                        tag: null,
+                        entityFilters: null,
+                        tagFilters: null
+                    }), param);
             },
             fetchCollection: function(value) {
                 this.typeHeaders.fetch({ reset: true });
             },
             onRefreshButton: function() {
                 this.fetchCollection();
-                if (this.searchVent) {
+                //to check url query param contain type or not 
+                var checkURLValue = Utils.getUrlState.getQueryParams(this.url);
+                if (this.searchVent && (_.has(checkURLValue, "tag") || _.has(checkURLValue, "type") || _.has(checkURLValue, "query"))) {
                     this.searchVent.trigger('search:refresh');
                 }
             },
@@ -175,6 +275,36 @@ define(['require',
                         modal.trigger('cancel');
                     });
                 });
+            },
+            openAttrFilter: function(filterType) {
+                var that = this;
+                require(['views/search/SearchQueryView'], function(SearchQueryView) {
+                    that.attrModal = new SearchQueryView({
+                        value: that.value,
+                        tag: (filterType === "tag" ? true : false),
+                        type: (filterType === "type" ? true : false),
+                        searchVent: that.searchVent,
+                        typeHeaders: that.typeHeaders,
+                        entityDefCollection: that.entityDefCollection,
+                        enumDefCollection: that.enumDefCollection,
+                        classificationDefCollection: that.classificationDefCollection
+                    });
+                    that.attrModal.on('ok', function(scope, e) {
+                        that.okAttrFilterButton(e);
+                    });
+                });
+            },
+            okAttrFilterButton: function(e) {
+                var filtertype = this.attrModal.tag ? 'tagFilters' : 'entityFilters',
+                    rule = this.attrModal.RQueryBuilder.currentView.ui.builder.queryBuilder('getRules');
+                if (rule) {
+                    this.query[this.type][filtertype] = CommonViewFunction.attributeFilter.generateUrl(rule.rules);
+                    this.makeFilterButtonActive(filtertype);
+                    this.attrModal.modal.close();
+                    if ($(e.currentTarget).hasClass('search')) {
+                        this.findSearchResult();
+                    }
+                }
             },
             manualRender: function(paramObj) {
                 this.updateQueryObject(paramObj);
@@ -215,17 +345,26 @@ define(['require',
                     } else if (this.value.dslChecked == "false" && this.dsl == true) {
                         this.ui.searchType.prop("checked", false).trigger("change");
                     }
+                    this.ui.typeLov.val(this.value.type);
                     if (this.ui.typeLov.data('select2')) {
-                        this.ui.typeLov.val(this.value.type).trigger('change');
-                    } else {
-                        this.ui.typeLov.val(this.value.type);
+                        if (this.ui.typeLov.val() !== this.value.type) {
+                            this.value.type = null;
+                            this.ui.typeLov.val("").trigger("change");
+                        } else {
+                            this.ui.typeLov.trigger("change");
+                        }
                     }
 
                     if (!this.dsl) {
+                        this.ui.tagLov.val(this.value.tag);
                         if (this.ui.tagLov.data('select2')) {
-                            this.ui.tagLov.val(this.value.tag).trigger('change');
-                        } else {
-                            this.ui.typeLov.val(this.value.tag);
+                            // To handle delete scenario.
+                            if (this.ui.tagLov.val() !== this.value.tag) {
+                                this.value.tag = null;
+                                this.ui.tagLov.val("").trigger("change");
+                            } else {
+                                this.ui.tagLov.trigger("change");
+                            }
                         }
                     }
                     this.ui.searchInput.val(this.value.query || "");
@@ -239,17 +378,28 @@ define(['require',
             },
             triggerSearch: function(value) {
                 this.query[this.type].query = value || null;
+                var params = {
+                    searchType: this.type,
+                    dslChecked: this.ui.searchType.is(':checked')
+                }
                 this.query[this.type].type = this.ui.typeLov.select2('val') || null;
                 if (!this.dsl) {
                     this.query[this.type].tag = this.ui.tagLov.select2('val') || null;
                 }
+                if (this.dsl) {
+                    params['attributes'] = null;
+                } else {
+                    var columnList = JSON.parse(Utils.localStorage.getValue('columnList'));
+                    if (columnList) {
+                        params['attributes'] = columnList[this.query[this.type].type];
+                    } else {
+                        params['attributes'] = null;
+                    }
+                }
 
                 Utils.setUrl({
                     url: '#!/search/searchResult',
-                    urlParams: _.extend(this.query[this.type], {
-                        searchType: this.type,
-                        dslChecked: this.ui.searchType.is(':checked')
-                    }),
+                    urlParams: _.extend(this.query[this.type], params),
                     updateTabState: function() {
                         return { searchUrl: this.url, stateChanged: true };
                     },
@@ -263,7 +413,11 @@ define(['require',
                     this.type = "dsl";
                     this.dsl = true;
                     this.$('.tagBox').hide();
+                    this.$('.temFilterBtn').hide();
+                    this.$('.temFilter').toggleClass('col-sm-10 col-sm-12');
                 } else {
+                    this.$('.temFilter').toggleClass('col-sm-10 col-sm-12');
+                    this.$('.temFilterBtn').show();
                     this.$('.tagBox').show();
                     this.dsl = false;
                     this.type = "basic";
@@ -289,7 +443,7 @@ define(['require',
                 this.ui.typeLov.val("").trigger("change");
                 this.ui.tagLov.val("").trigger("change");
                 this.ui.searchInput.val("");
-                this.checkForButtonVisiblity()
+                this.checkForButtonVisiblity();
                 Utils.setUrl({
                     url: '#!/search/searchResult',
                     urlParams: {

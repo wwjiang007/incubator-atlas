@@ -18,13 +18,12 @@
 package org.apache.atlas.model.impexp;
 
 import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
+import org.codehaus.jackson.annotate.JsonAnySetter;
 import org.codehaus.jackson.annotate.JsonAutoDetect;
+import org.codehaus.jackson.annotate.JsonIgnore;
 import org.codehaus.jackson.annotate.JsonIgnoreProperties;
 import org.codehaus.jackson.map.annotate.JsonSerialize;
 
-import javax.xml.bind.annotation.XmlAccessType;
-import javax.xml.bind.annotation.XmlAccessorType;
-import javax.xml.bind.annotation.XmlRootElement;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
@@ -32,28 +31,27 @@ import java.util.Map;
 import static org.codehaus.jackson.annotate.JsonAutoDetect.Visibility.NONE;
 import static org.codehaus.jackson.annotate.JsonAutoDetect.Visibility.PUBLIC_ONLY;
 
-
 @JsonAutoDetect(getterVisibility=PUBLIC_ONLY, setterVisibility=PUBLIC_ONLY, fieldVisibility=NONE)
 @JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown=true)
-@XmlRootElement
-@XmlAccessorType(XmlAccessType.PROPERTY)
 public class AtlasImportRequest implements Serializable {
-    private static final long serialVersionUID = 1L;
+    private static final long   serialVersionUID = 1L;
 
-    private Map<String, Object> options;
+    public  static final String TRANSFORMS_KEY             = "transforms";
+    private static final String START_POSITION_KEY         = "startPosition";
+    private static final String START_GUID_KEY             = "startGuid";
+    private static final String FILE_NAME_KEY              = "fileName";
+    private static final String UPDATE_TYPE_DEFINITION_KEY = "updateTypeDefinition";
+
+    private Map<String, String> options;
 
     public AtlasImportRequest() {
         this.options = new HashMap<>();
     }
 
-    public AtlasImportRequest(Map<String, Object> options) {
-        this.options = options;
-    }
+    public Map<String, String> getOptions() { return options; }
 
-    public Map<String, Object> getOptions() { return options; }
-
-    public void setOptions(Map<String, Object> options) { this.options = options; }
+    public void setOptions(Map<String, String> options) { this.options = options; }
 
     public StringBuilder toString(StringBuilder sb) {
         if (sb == null) {
@@ -73,4 +71,43 @@ public class AtlasImportRequest implements Serializable {
     public String toString() {
         return toString(new StringBuilder()).toString();
     }
- }
+
+    @JsonIgnore
+    public String getStartGuid() {
+        return getOptionForKey(START_GUID_KEY);
+    }
+
+    @JsonIgnore
+    public String getFileName() {
+        return getOptionForKey(FILE_NAME_KEY);
+    }
+
+    @JsonIgnore
+    public void setFileName(String fileName) {
+        setOption(FILE_NAME_KEY, fileName);
+    }
+
+    @JsonIgnore
+    public String getStartPosition() {
+        return getOptionForKey(START_POSITION_KEY);
+    }
+
+    @JsonIgnore
+    public String getUpdateTypeDefs() {
+        return getOptionForKey(UPDATE_TYPE_DEFINITION_KEY);
+    }
+
+    private String getOptionForKey(String key) {
+        if (this.options == null || !this.options.containsKey(key)) {
+            return null;
+        }
+
+        return (String) this.options.get(key);
+    }
+ @JsonAnySetter
+    public void setOption(String key, String value) {
+        if (null == options) {
+            options = new HashMap<>();
+        }
+        options.put(key, value);
+    }}

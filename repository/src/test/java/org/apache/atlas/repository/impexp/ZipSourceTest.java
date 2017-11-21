@@ -21,6 +21,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.testng.Assert;
+import org.testng.ITestContext;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
@@ -29,12 +30,30 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.List;
 
+import static org.apache.atlas.repository.impexp.ZipFileResourceTestUtils.getZipSource;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertNotNull;
+import static org.testng.AssertJUnit.assertTrue;
+
 public class ZipSourceTest {
     @DataProvider(name = "zipFileStocks")
     public static Object[][] getDataFromZipFile() throws IOException {
         FileInputStream fs = ZipFileResourceTestUtils.getFileInputStream("stocks.zip");
 
         return new Object[][] {{ new ZipSource(fs) }};
+    }
+
+    @DataProvider(name = "zipFileStocksFloat")
+    public static Object[][] getDataFromZipFileWithLongFloats() throws IOException {
+        FileInputStream fs = ZipFileResourceTestUtils.getFileInputStream("stocks-float.zip");
+
+        return new Object[][] {{ new ZipSource(fs) }};
+    }
+
+    @DataProvider(name = "sales")
+    public static Object[][] getDataFromQuickStart_v1_Sales(ITestContext context) throws IOException {
+        return getZipSource("sales-v1-full.zip");
     }
 
     @Test
@@ -50,12 +69,12 @@ public class ZipSourceTest {
     public void examineContents_BehavesAsExpected(ZipSource zipSource) throws IOException, AtlasBaseException {
         List<String> creationOrder = zipSource.getCreationOrder();
 
-        Assert.assertNotNull(creationOrder);
-        Assert.assertEquals(creationOrder.size(), 4);
+        assertNotNull(creationOrder);
+        assertEquals(creationOrder.size(), 4);
 
         AtlasTypesDef typesDef = zipSource.getTypesDef();
-        Assert.assertNotNull(typesDef);
-        Assert.assertEquals(typesDef.getEntityDefs().size(), 6);
+        assertNotNull(typesDef);
+        assertEquals(typesDef.getEntityDefs().size(), 6);
 
         useCreationOrderToFetchEntitiesWithExtInfo(zipSource, creationOrder);
         useCreationOrderToFetchEntities(zipSource, creationOrder);
@@ -66,13 +85,13 @@ public class ZipSourceTest {
     private void useCreationOrderToFetchEntities(ZipSource zipSource, List<String> creationOrder) {
         for (String guid : creationOrder) {
             AtlasEntity e = zipSource.getByGuid(guid);
-            Assert.assertNotNull(e);
+            assertNotNull(e);
         }
     }
 
     private void verifyGuidRemovalOnImportComplete(ZipSource zipSource, String guid) {
         AtlasEntity e = zipSource.getByGuid(guid);
-        Assert.assertNotNull(e);
+        assertNotNull(e);
 
         zipSource.onImportComplete(guid);
 
@@ -88,7 +107,7 @@ public class ZipSourceTest {
     private void useCreationOrderToFetchEntitiesWithExtInfo(ZipSource zipSource, List<String> creationOrder) throws AtlasBaseException {
         for (String guid : creationOrder) {
             AtlasEntity.AtlasEntityExtInfo e = zipSource.getEntityWithExtInfo(guid);
-            Assert.assertNotNull(e);
+            assertNotNull(e);
         }
     }
 
@@ -100,10 +119,71 @@ public class ZipSourceTest {
         for (int i = 0; i < creationOrder.size(); i++) {
             AtlasEntity e = zipSource.next();
 
-            Assert.assertNotNull(e);
-            Assert.assertEquals(e.getGuid(), creationOrder.get(i));
+            assertNotNull(e);
+            assertEquals(e.getGuid(), creationOrder.get(i));
         }
 
-        Assert.assertFalse(zipSource.hasNext());
+        assertFalse(zipSource.hasNext());
+    }
+
+    @Test(dataProvider = "sales")
+    public void iteratorSetPositionBehavor(ZipSource zipSource) throws IOException, AtlasBaseException {
+        Assert.assertTrue(zipSource.hasNext());
+
+        List<String> creationOrder = zipSource.getCreationOrder();
+        int moveToPosition_2 = 2;
+        zipSource.setPosition(moveToPosition_2);
+
+        assertEquals(zipSource.getPosition(), moveToPosition_2);
+        assertTrue(zipSource.getPosition() < creationOrder.size());
+
+        assertTrue(zipSource.hasNext());
+        for (int i = 1; i < 4; i++) {
+            zipSource.next();
+            assertEquals(zipSource.getPosition(), moveToPosition_2 + i);
+        }
+
+        assertTrue(zipSource.hasNext());
+    }
+
+    @Test(dataProvider = "zipFileStocksFloat")
+    public void attemptToSerializeLongFloats(ZipSource zipSource) throws IOException, AtlasBaseException {
+        Assert.assertTrue(zipSource.hasNext());
+        assertTrue(zipSource.hasNext());
+        assertTrue(zipSource.hasNext());
+
+        AtlasEntity.AtlasEntityWithExtInfo e = zipSource.getNextEntityWithExtInfo();
+        assertNotNull(e);
+        assertTrue(e.getEntity().getClassifications().size() > 0);
+        assertNotNull(e.getEntity().getClassifications().get(0).getAttribute("fv"));
+        assertEquals(e.getEntity().getClassifications().get(0).getAttribute("fv").toString(), "3.4028235E+38");
+
+        assertTrue(zipSource.hasNext());
+    }
+
+    @Test(dataProvider = "zipFileStocks")
+    public void applyTransformation(ZipSource zipSource) throws IOException, AtlasBaseException {
+        ImportTransforms transforms = getTransformForHiveDB();
+        zipSource.setImportTransform(transforms);
+
+        Assert.assertTrue(zipSource.hasNext());
+        List<String> creationOrder = zipSource.getCreationOrder();
+        for (int i = 0; i < creationOrder.size(); i++) {
+            AtlasEntity e = zipSource.next();
+            if(e.getTypeName().equals("hive_db")) {
+                Object o = e.getAttribute("qualifiedName");
+                String s = (String) o;
+
+                assertNotNull(e);
+                assertTrue(s.contains("@cl2"));
+                break;
+            }
+        }
+    }
+
+    private ImportTransforms getTransformForHiveDB() {
+        ImportTransforms tr = ImportTransforms.fromJson("{ \"hive_db\": { \"qualifiedName\": [ \"replace:@cl1:@cl2\" ] } }");
+
+        return tr;
     }
 }

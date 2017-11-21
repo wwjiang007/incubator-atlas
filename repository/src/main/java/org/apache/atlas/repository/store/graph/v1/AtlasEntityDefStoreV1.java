@@ -17,7 +17,6 @@
  */
 package org.apache.atlas.repository.store.graph.v1;
 
-import com.google.inject.Inject;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.typedef.AtlasEntityDef;
@@ -32,6 +31,7 @@ import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.inject.Inject;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -265,6 +265,11 @@ public class AtlasEntityDefStoreV1 extends AtlasAbstractDefStoreV1 implements At
             throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, name);
         }
 
+        // error if we are trying to delete an entityDef that has a relationshipDef
+        if (typeDefStore.hasIncomingEdgesWithLabel(ret, AtlasGraphUtilsV1.RELATIONSHIPTYPE_EDGE_LABEL)){
+            throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_RELATIONSHIPS, name);
+        }
+
         typeDefStore.deleteTypeVertexOutEdges(ret);
 
         if (LOG.isDebugEnabled()) {
@@ -311,6 +316,11 @@ public class AtlasEntityDefStoreV1 extends AtlasAbstractDefStoreV1 implements At
 
         if (ret == null) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_GUID_NOT_FOUND, guid);
+        }
+
+        // error if we are trying to delete an entityDef that has a relationshipDef
+        if (typeDefStore.hasIncomingEdgesWithLabel(ret, AtlasGraphUtilsV1.RELATIONSHIPTYPE_EDGE_LABEL)){
+            throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_RELATIONSHIPS, typeName);
         }
 
         typeDefStore.deleteTypeVertexOutEdges(ret);

@@ -17,19 +17,16 @@
  */
 package org.apache.atlas;
 
-import static org.apache.atlas.security.SecurityProperties.TLS_ENABLED;
-
-import java.io.IOException;
-import java.net.ConnectException;
-import java.util.List;
-import java.util.Map;
-
-import javax.ws.rs.HttpMethod;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
-
+import com.google.common.annotations.VisibleForTesting;
+import com.sun.jersey.api.client.Client;
+import com.sun.jersey.api.client.ClientHandlerException;
+import com.sun.jersey.api.client.ClientResponse;
+import com.sun.jersey.api.client.GenericType;
+import com.sun.jersey.api.client.WebResource;
+import com.sun.jersey.api.client.config.DefaultClientConfig;
+import com.sun.jersey.api.client.filter.HTTPBasicAuthFilter;
+import com.sun.jersey.api.json.JSONConfiguration;
+import com.sun.jersey.client.urlconnection.URLConnectionClientHandler;
 import org.apache.atlas.model.metrics.AtlasMetrics;
 import org.apache.atlas.security.SecureClientUtils;
 import org.apache.atlas.utils.AuthenticationUtil;
@@ -41,16 +38,18 @@ import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.sun.jersey.api.client.Client;
-import com.sun.jersey.api.client.ClientHandlerException;
-import com.sun.jersey.api.client.ClientResponse;
-import com.sun.jersey.api.client.GenericType;
-import com.sun.jersey.api.client.WebResource;
-import com.sun.jersey.api.client.config.DefaultClientConfig;
-import com.sun.jersey.api.client.filter.HTTPBasicAuthFilter;
-import com.sun.jersey.api.json.JSONConfiguration;
-import com.sun.jersey.client.urlconnection.URLConnectionClientHandler;
+import javax.ws.rs.HttpMethod;
+import javax.ws.rs.core.Cookie;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.MultivaluedMap;
+import javax.ws.rs.core.Response;
+import javax.ws.rs.core.UriBuilder;
+import java.io.IOException;
+import java.net.ConnectException;
+import java.util.List;
+import java.util.Map;
+
+import static org.apache.atlas.security.SecurityProperties.TLS_ENABLED;
 
 public abstract class AtlasBaseClient {
     public static final String BASE_URI = "api/atlas/";
@@ -79,6 +78,7 @@ public abstract class AtlasBaseClient {
     private String basicAuthPassword;
     private AtlasClientContext atlasClientContext;
     private boolean retryEnabled = false;
+    private Cookie cookie = null;
 
     protected AtlasBaseClient() {
     }
@@ -108,6 +108,11 @@ public abstract class AtlasBaseClient {
         initializeState(baseUrls, ugi, doAsUser);
     }
 
+    protected AtlasBaseClient(String[] baseUrls, Cookie cookie) {
+        this.cookie = cookie;
+        initializeState(baseUrls, null, null);
+    }
+
     @VisibleForTesting
     protected AtlasBaseClient(WebResource service, Configuration configuration) {
         this.service = service;
@@ -126,6 +131,10 @@ public abstract class AtlasBaseClient {
         }
 
         initializeState(configuration, baseUrl, null, null);
+    }
+
+    public void setCookie(Cookie cookie) {
+        this.cookie = cookie;
     }
 
     protected static UserGroupInformation getCurrentUGI() throws AtlasException {
@@ -174,14 +183,14 @@ public abstract class AtlasBaseClient {
 
         final URLConnectionClientHandler handler;
 
-        if ((!AuthenticationUtil.isKerberosAuthenticationEnabled()) && basicAuthUser != null && basicAuthPassword != null) {
+        if ((AuthenticationUtil.isKerberosAuthenticationEnabled())) {
+            handler = SecureClientUtils.getClientConnectionHandler(config, configuration, doAsUser, ugi);
+        } else {
             if (configuration.getBoolean(TLS_ENABLED, false)) {
                 handler = SecureClientUtils.getUrlConnectionClientHandler();
             } else {
                 handler = new URLConnectionClientHandler();
             }
-        } else {
-            handler = SecureClientUtils.getClientConnectionHandler(config, configuration, doAsUser, ugi);
         }
         Client client = new Client(handler, config);
         client.setReadTimeout(readTimeout);
@@ -294,10 +303,20 @@ public abstract class AtlasBaseClient {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Calling API [ {} : {} ] {}", api.getMethod(), api.getPath(), requestObject != null ? "<== " + requestObject : "");
             }
-            clientResponse = resource
+
+            WebResource.Builder requestBuilder = resource.getRequestBuilder();
+
+            // Set content headers
+            requestBuilder
                     .accept(JSON_MEDIA_TYPE)
-                    .type(JSON_MEDIA_TYPE)
-                    .method(api.getMethod(), ClientResponse.class, requestObject);
+                    .type(JSON_MEDIA_TYPE);
+
+            // Set cookie if present
+            if (cookie != null) {
+                requestBuilder.cookie(cookie);
+            }
+
+            clientResponse = requestBuilder.method(api.getMethod(), ClientResponse.class, requestObject);
 
             if (LOG.isDebugEnabled()) {
                 LOG.debug("API {} returned status {}", resource.getURI(), clientResponse.getStatus());
@@ -410,7 +429,7 @@ public abstract class AtlasBaseClient {
         for (int i = 0; i < getNumberOfRetries(); i++) {
             WebResource resource = resourceCreator.createResource();
             try {
-                LOG.debug("Using resource {} for {} times", resource.getURI(), i);
+                LOG.debug("Using resource {} for {} times", resource.getURI(), i + 1);
                 return callAPIWithResource(api, resource, requestObject, JSONObject.class);
             } catch (ClientHandlerException che) {
                 if (i == (getNumberOfRetries() - 1)) {

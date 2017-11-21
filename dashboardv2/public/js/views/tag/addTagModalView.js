@@ -26,6 +26,7 @@ define(['require',
     'utils/UrlLinks',
     'utils/Enums',
     'utils/Messages',
+    'daterangepicker'
 ], function(require, AddTagModalViewTmpl, VTagList, VCommonList, Modal, VEntity, Utils, UrlLinks, Enums, Messages) {
     'use strict';
 
@@ -62,14 +63,13 @@ define(['require',
                     okText: 'Add',
                     cancelText: "Cancel",
                     allowCancel: true,
-                },
-                state = this.tagModel ? false : true;
+                };
             if (this.tagModel) {
                 modalObj.title = 'Edit Tag';
                 modalObj.okText = 'Update';
             }
             this.modal = new Modal(modalObj).open();
-            this.modal.$el.find('button.ok').attr("disabled", state);
+            this.modal.$el.find('button.ok').attr("disabled", true);
             this.on('ok', function() {
                 var tagName = this.tagModel ? this.tagModel.typeName : this.ui.addTagOptions.val(),
                     tagAttributes = {},
@@ -83,7 +83,12 @@ define(['require',
                     };
                 tagAttributeNames.each(function(i, item) {
                     var selection = $(item).data("key");
-                    tagAttributes[selection] = $(item).val() || null;
+                    var datatypeSelection = $(item).data("type");
+                    if (datatypeSelection === "date") {
+                        tagAttributes[selection] = Date.parse($(item).val()) || null;
+                    } else {
+                        tagAttributes[selection] = $(item).val() || null;
+                    }
                 });
 
                 if (that.multiple) {
@@ -242,11 +247,17 @@ define(['require',
             this.subAttributeData(attributeDefs);
         },
         showAttributeBox: function() {
+            var that = this;
             this.$('.attrLoader').hide();
             this.$('.form-group.hide').removeClass('hide');
             if (this.ui.tagAttribute.children().length !== 0) {
                 this.ui.tagAttribute.parent().show();
             }
+            this.ui.tagAttribute.find('input,select').on("keyup change", function(e) {
+                if (e.keyCode != 32) {
+                    that.modal.$el.find('button.ok').attr("disabled", false);
+                }
+            });
         },
         hideAttributeBox: function() {
             this.ui.tagAttribute.children().empty();
@@ -261,19 +272,54 @@ define(['require',
                     var typeName = Utils.getName(obj, 'typeName');
                     var typeNameValue = that.enumDefCollection.fullCollection.findWhere({ 'name': typeName });
                     if (typeNameValue) {
-                        var str = "<option disabled='disabled'" + (!that.tagModel ? 'selected' : '') + ">-- Select " + typeName + " --</option>";
+                        var str = '<option value=""' + (!that.tagModel ? 'selected' : '') + '>-- Select ' + typeName + " --</option>";
                         var enumValue = typeNameValue.get('elementDefs');
                         _.each(enumValue, function(key, value) {
-                            str += '<option ' + (that.tagModel && key.value === _.values(that.tagModel.attributes)[0] ? 'selected' : '') + '>' + key.value + '</option>';
+                            str += '<option ' + ((that.tagModel && key.value === that.tagModel.attributes[name]) ? 'selected' : '') + '>' + key.value + '</option>';
                         })
-                        that.ui.tagAttribute.append('<div class="form-group"><label>' + name + '</label>' +
+                        that.ui.tagAttribute.append('<div class="form-group"><label>' + name + '</label>' + ' (' + typeName + ')' +
                             '<select class="form-control attributeInputVal attrName" data-key="' + name + '">' + str + '</select></div>');
                     } else {
-                        that.ui.tagAttribute.append('<div class="form-group"><label>' + name + '</label>' +
-                            '<input type="text" value="' + (that.tagModel ? (that.tagModel.attributes[name] == null ? '' : that.tagModel.attributes[name]) : '') + '" class="form-control attributeInputVal attrName" data-key="' + name + '" ></input></div>');
+                        var textElement = that.getElement(name, typeName);
+                        that.ui.tagAttribute.append('<div class="form-group"><label>' + name + '</label>' + ' (' + typeName + ')' + textElement);
+                    }
+                });
+                that.$('input[data-type="date"]').each(function() {
+                    if (!$(this).data('daterangepicker')) {
+                        var dateObj = {
+                            "singleDatePicker": true,
+                            "showDropdowns": true,
+                            "timePicker": true,
+                            locale: {
+                                format: 'MM/DD/YYYY h:mm A'
+                            }
+                        };
+                        if (that.tagModel) {
+                            var formatDate = Number(this.value);
+                            dateObj["startDate"] = new Date(formatDate);
+                        }
+                        $(this).daterangepicker(dateObj);
+                    }
+                });
+                that.$('select[data-type="boolean"]').each(function() {
+                    var labelName = $(this).data('key');
+                    if (that.tagModel) {
+                        this.value = that.tagModel.attributes[labelName];
                     }
                 });
                 this.showAttributeBox();
+            }
+        },
+        getElement: function(labelName, typeName) {
+            var value = this.tagModel && this.tagModel.attributes ? (this.tagModel.attributes[labelName] || "") : "",
+                type = (typeName === "int" || typeName === "long" || typeName === "float" || typeName === "byte" || typeName === "double" || typeName === "short") ? "number" : "text";
+            if (typeName === "boolean") {
+                return '<select class="form-control attributeInputVal attrName" data-key="' + labelName + '" data-type="' + typeName + '"> ' +
+                    '<option value="">--Select true or false--</option>' +
+                    '<option value="true">true</option>' +
+                    '<option value="false">false</option></select>';
+            } else {
+                return '<input type="' + type + '" value="' + value + '" class="form-control attributeInputVal attrName" data-key="' + labelName + '"  data-type="' + typeName + '"></input></div>';
             }
         },
         saveTagData: function(options) {

@@ -17,20 +17,11 @@
  */
 package org.apache.atlas.type;
 
-import com.sun.jersey.spi.resource.Singleton;
-
-import org.apache.atlas.AtlasErrorCode;
-import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
-import org.apache.atlas.model.typedef.AtlasClassificationDef;
-import org.apache.atlas.model.typedef.AtlasEntityDef;
-import org.apache.atlas.model.typedef.AtlasEnumDef;
-import org.apache.atlas.model.typedef.AtlasStructDef;
-import org.apache.atlas.model.typedef.AtlasTypesDef;
-import org.apache.commons.collections.CollectionUtils;
-import org.apache.commons.lang.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.ATLAS_TYPE_ARRAY_PREFIX;
+import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.ATLAS_TYPE_ARRAY_SUFFIX;
+import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.ATLAS_TYPE_MAP_KEY_VAL_SEP;
+import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.ATLAS_TYPE_MAP_PREFIX;
+import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.ATLAS_TYPE_MAP_SUFFIX;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -41,16 +32,27 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
-import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.ATLAS_TYPE_ARRAY_PREFIX;
-import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.ATLAS_TYPE_ARRAY_SUFFIX;
-import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.ATLAS_TYPE_MAP_KEY_VAL_SEP;
-import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.ATLAS_TYPE_MAP_PREFIX;
-import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.ATLAS_TYPE_MAP_SUFFIX;
+import javax.inject.Singleton;
 
+import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
+import org.apache.atlas.model.typedef.AtlasClassificationDef;
+import org.apache.atlas.model.typedef.AtlasEntityDef;
+import org.apache.atlas.model.typedef.AtlasEnumDef;
+import org.apache.atlas.model.typedef.AtlasRelationshipDef;
+import org.apache.atlas.model.typedef.AtlasStructDef;
+import org.apache.atlas.model.typedef.AtlasTypesDef;
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 /**
  * registry for all types defined in Atlas.
  */
 @Singleton
+@Component
 public class AtlasTypeRegistry {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasStructType.class);
     private static final int    DEFAULT_LOCK_MAX_WAIT_TIME_IN_SECONDS = 15;
@@ -184,9 +186,9 @@ public class AtlasTypeRegistry {
         return registryData.classificationDefs.getTypeByName(name);
     }
 
+    public Collection<AtlasRelationshipDef> getAllRelationshipDefs() { return registryData.relationshipDefs.getAll(); }
 
     public Collection<AtlasEntityDef> getAllEntityDefs() { return registryData.entityDefs.getAll(); }
-
     public AtlasEntityDef getEntityDefByGuid(String guid) {
         return registryData.entityDefs.getTypeDefByGuid(guid);
     }
@@ -196,11 +198,20 @@ public class AtlasTypeRegistry {
     }
 
     public Collection<String> getAllEntityDefNames() { return registryData.entityDefs.getAllNames(); }
-
     public Collection<AtlasEntityType> getAllEntityTypes() { return registryData.entityDefs.getAllTypes(); }
-
     public AtlasEntityType getEntityTypeByName(String name) { return registryData.entityDefs.getTypeByName(name); }
+    /**
+     * @return relationshipTypes
+     */
+    public Collection<AtlasRelationshipType> getAllRelationshipTypes() { return registryData.relationshipDefs.getAllTypes(); }
 
+    public AtlasRelationshipDef getRelationshipDefByGuid(String guid) {
+        return registryData.relationshipDefs.getTypeDefByGuid(guid);
+    }
+    public AtlasRelationshipDef getRelationshipDefByName(String name) {
+        return registryData.relationshipDefs.getTypeDefByName(name);
+    }
+    public AtlasRelationshipType getRelationshipTypeByName(String name) { return registryData.relationshipDefs.getTypeByName(name); }
 
     public AtlasTransientTypeRegistry lockTypeRegistryForUpdate() throws AtlasBaseException {
         return lockTypeRegistryForUpdate(DEFAULT_LOCK_MAX_WAIT_TIME_IN_SECONDS);
@@ -221,6 +232,7 @@ public class AtlasTypeRegistry {
         final TypeDefCache<AtlasStructDef, AtlasStructType>                   structDefs;
         final TypeDefCache<AtlasClassificationDef, AtlasClassificationType>   classificationDefs;
         final TypeDefCache<AtlasEntityDef, AtlasEntityType>                   entityDefs;
+        final TypeDefCache<AtlasRelationshipDef, AtlasRelationshipType>       relationshipDefs;
         final TypeDefCache<? extends AtlasBaseTypeDef, ? extends AtlasType>[] allDefCaches;
 
         RegistryData() {
@@ -229,7 +241,8 @@ public class AtlasTypeRegistry {
             structDefs         = new TypeDefCache<>(allTypes);
             classificationDefs = new TypeDefCache<>(allTypes);
             entityDefs         = new TypeDefCache<>(allTypes);
-            allDefCaches       = new TypeDefCache[] { enumDefs, structDefs, classificationDefs, entityDefs };
+            relationshipDefs   = new TypeDefCache<>(allTypes);
+            allDefCaches       = new TypeDefCache[] { enumDefs, structDefs, classificationDefs, entityDefs, relationshipDefs };
 
             init();
         }
@@ -287,6 +300,7 @@ public class AtlasTypeRegistry {
                 structDefs.updateGuid(typeName, guid);
                 classificationDefs.updateGuid(typeName, guid);
                 entityDefs.updateGuid(typeName, guid);
+                relationshipDefs.updateGuid(typeName, guid);
             }
         }
 
@@ -296,6 +310,7 @@ public class AtlasTypeRegistry {
                 structDefs.removeTypeDefByGuid(guid);
                 classificationDefs.removeTypeDefByGuid(guid);
                 entityDefs.removeTypeDefByGuid(guid);
+                relationshipDefs.removeTypeDefByGuid(guid);
             }
         }
 
@@ -305,6 +320,7 @@ public class AtlasTypeRegistry {
                 structDefs.removeTypeDefByName(typeName);
                 classificationDefs.removeTypeDefByName(typeName);
                 entityDefs.removeTypeDefByName(typeName);
+                relationshipDefs.removeTypeDefByName(typeName);
             }
         }
 
@@ -314,6 +330,7 @@ public class AtlasTypeRegistry {
             structDefs.clear();
             classificationDefs.clear();
             entityDefs.clear();
+            relationshipDefs.clear();
 
             init();
         }
@@ -332,6 +349,7 @@ public class AtlasTypeRegistry {
             addTypesWithNoRefResolve(parent.getAllStructDefs());
             addTypesWithNoRefResolve(parent.getAllClassificationDefs());
             addTypesWithNoRefResolve(parent.getAllEntityDefs());
+            addTypesWithNoRefResolve(parent.getAllRelationshipDefs());
 
             addedTypes.clear();
             updatedTypes.clear();
@@ -345,6 +363,10 @@ public class AtlasTypeRegistry {
 
             for (AtlasType type : registryData.allTypes.getAllTypes()) {
                 type.resolveReferencesPhase2(this);
+            }
+
+            for (AtlasType type : registryData.allTypes.getAllTypes()) {
+                type.resolveReferencesPhase3(this);
             }
         }
 
@@ -406,6 +428,7 @@ public class AtlasTypeRegistry {
                 addTypesWithNoRefResolve(typesDef.getStructDefs());
                 addTypesWithNoRefResolve(typesDef.getClassificationDefs());
                 addTypesWithNoRefResolve(typesDef.getEntityDefs());
+                addTypesWithNoRefResolve(typesDef.getRelationshipDefs());
 
                 resolveReferences();
             }
@@ -505,6 +528,7 @@ public class AtlasTypeRegistry {
                 updateTypesWithNoRefResolve(typesDef.getStructDefs());
                 updateTypesWithNoRefResolve(typesDef.getClassificationDefs());
                 updateTypesWithNoRefResolve(typesDef.getEntityDefs());
+                updateTypesWithNoRefResolve(typesDef.getRelationshipDefs());
             }
 
             if (LOG.isDebugEnabled()) {
@@ -518,6 +542,7 @@ public class AtlasTypeRegistry {
                 removeTypesWithNoRefResolve(typesDef.getStructDefs());
                 removeTypesWithNoRefResolve(typesDef.getClassificationDefs());
                 removeTypesWithNoRefResolve(typesDef.getEntityDefs());
+                removeTypesWithNoRefResolve(typesDef.getRelationshipDefs());
 
                 resolveReferences();
             }
@@ -549,6 +574,9 @@ public class AtlasTypeRegistry {
                 case ENTITY:
                     registryData.entityDefs.removeTypeDefByName(typeDef.getName());
                     break;
+                case RELATIONSHIP:
+                    registryData.relationshipDefs.removeTypeDefByName(typeDef.getName());
+                    break;
             }
             deletedTypes.add(typeDef);
         }
@@ -566,6 +594,9 @@ public class AtlasTypeRegistry {
                     break;
                 case ENTITY:
                     registryData.entityDefs.removeTypeDefByGuid(typeDef.getGuid());
+                    break;
+                case RELATIONSHIP:
+                    registryData.relationshipDefs.removeTypeDefByGuid(typeDef.getGuid());
                     break;
             }
             deletedTypes.add(typeDef);
@@ -644,11 +675,15 @@ public class AtlasTypeRegistry {
                     AtlasClassificationDef classificationDef = (AtlasClassificationDef) typeDef;
 
                     registryData.classificationDefs.addType(classificationDef,
-                                                            new AtlasClassificationType(classificationDef));
+                            new AtlasClassificationType(classificationDef));
                 } else if (typeDef.getClass().equals(AtlasEntityDef.class)) {
                     AtlasEntityDef entityDef = (AtlasEntityDef) typeDef;
 
                     registryData.entityDefs.addType(entityDef, new AtlasEntityType(entityDef));
+                } else if (typeDef.getClass().equals(AtlasRelationshipDef.class)) {
+                    AtlasRelationshipDef relationshipDef = (AtlasRelationshipDef) typeDef;
+
+                    registryData.relationshipDefs.addType(relationshipDef, new AtlasRelationshipType(relationshipDef));
                 }
 
                 addedTypes.add(typeDef);
@@ -662,7 +697,7 @@ public class AtlasTypeRegistry {
         private void addTypesWithNoRefResolve(Collection<? extends AtlasBaseTypeDef> typeDefs) throws AtlasBaseException {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("==> AtlasTypeRegistry.addTypesWithNoRefResolve(length={})",
-                          (typeDefs == null ? 0 : typeDefs.size()));
+                        (typeDefs == null ? 0 : typeDefs.size()));
             }
 
             if (CollectionUtils.isNotEmpty(typeDefs)) {
@@ -673,7 +708,7 @@ public class AtlasTypeRegistry {
 
             if (LOG.isDebugEnabled()) {
                 LOG.debug("<== AtlasTypeRegistry.addTypesWithNoRefResolve(length={})",
-                          (typeDefs == null ? 0 : typeDefs.size()));
+                        (typeDefs == null ? 0 : typeDefs.size()));
             }
         }
 
@@ -717,12 +752,17 @@ public class AtlasTypeRegistry {
 
                     registryData.classificationDefs.removeTypeDefByGuid(guid);
                     registryData.classificationDefs.addType(classificationDef,
-                                                            new AtlasClassificationType(classificationDef));
+                            new AtlasClassificationType(classificationDef));
                 } else if (typeDef.getClass().equals(AtlasEntityDef.class)) {
                     AtlasEntityDef entityDef = (AtlasEntityDef) typeDef;
 
                     registryData.entityDefs.removeTypeDefByGuid(guid);
                     registryData.entityDefs.addType(entityDef, new AtlasEntityType(entityDef));
+                } else if (typeDef.getClass().equals(AtlasRelationshipDef.class)) {
+                    AtlasRelationshipDef relationshipDef = (AtlasRelationshipDef) typeDef;
+
+                    registryData.relationshipDefs.removeTypeDefByGuid(guid);
+                    registryData.relationshipDefs.addType(relationshipDef, new AtlasRelationshipType(relationshipDef));
                 }
 
                 updatedTypes.add(typeDef);
@@ -754,12 +794,17 @@ public class AtlasTypeRegistry {
 
                     registryData.classificationDefs.removeTypeDefByName(name);
                     registryData.classificationDefs.addType(classificationDef,
-                                                            new AtlasClassificationType(classificationDef));
+                            new AtlasClassificationType(classificationDef));
                 } else if (typeDef.getClass().equals(AtlasEntityDef.class)) {
                     AtlasEntityDef entityDef = (AtlasEntityDef) typeDef;
 
                     registryData.entityDefs.removeTypeDefByName(name);
                     registryData.entityDefs.addType(entityDef, new AtlasEntityType(entityDef));
+                } else if (typeDef.getClass().equals(AtlasRelationshipDef.class)) {
+                    AtlasRelationshipDef relationshipDef = (AtlasRelationshipDef) typeDef;
+
+                    registryData.relationshipDefs.removeTypeDefByName(name);
+                    registryData.relationshipDefs.addType(relationshipDef, new AtlasRelationshipType(relationshipDef));
                 }
 
                 updatedTypes.add(typeDef);
@@ -773,7 +818,7 @@ public class AtlasTypeRegistry {
         private void updateTypesWithNoRefResolve(Collection<? extends AtlasBaseTypeDef> typeDefs) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("==> AtlasTypeRegistry.updateTypesWithNoRefResolve(length={})",
-                                                                             (typeDefs == null ? 0 : typeDefs.size()));
+                        (typeDefs == null ? 0 : typeDefs.size()));
             }
 
             if (CollectionUtils.isNotEmpty(typeDefs)) {
@@ -784,7 +829,7 @@ public class AtlasTypeRegistry {
 
             if (LOG.isDebugEnabled()) {
                 LOG.debug("<== AtlasTypeRegistry.updateTypesWithNoRefResolve(length={})",
-                                                                              (typeDefs == null ? 0 : typeDefs.size()));
+                        (typeDefs == null ? 0 : typeDefs.size()));
             }
         }
     }
@@ -811,7 +856,7 @@ public class AtlasTypeRegistry {
                 }
             } else {
                 LOG.warn("lockTypeRegistryForUpdate(): already locked. currentLockCount={}",
-                         typeRegistryUpdateLock.getHoldCount());
+                        typeRegistryUpdateLock.getHoldCount());
             }
 
             try {
@@ -845,8 +890,8 @@ public class AtlasTypeRegistry {
                 try {
                     if (typeRegistryUnderUpdate != ttr) {
                         LOG.error("releaseTypeRegistryForUpdate(): incorrect typeRegistry returned for release" +
-                                  ": found=" + ttr + "; expected=" + typeRegistryUnderUpdate,
-                                  new Exception().fillInStackTrace());
+                                        ": found=" + ttr + "; expected=" + typeRegistryUnderUpdate,
+                                new Exception().fillInStackTrace());
                     } else if (typeRegistryUpdateLock.getHoldCount() == 1) {
                         if (ttr != null && commitUpdates) {
                             typeRegistry.registryData = ttr.registryData;
@@ -864,7 +909,7 @@ public class AtlasTypeRegistry {
                 }
             } else {
                 LOG.error("releaseTypeRegistryForUpdate(): current thread does not hold the lock",
-                          new Exception().fillInStackTrace());
+                        new Exception().fillInStackTrace());
             }
 
             LOG.debug("<== releaseTypeRegistryForUpdate()");

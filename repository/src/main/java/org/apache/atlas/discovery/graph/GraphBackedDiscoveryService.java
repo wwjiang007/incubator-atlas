@@ -18,18 +18,8 @@
 
 package org.apache.atlas.discovery.graph;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-
-import javax.inject.Inject;
-import javax.inject.Singleton;
-
 import org.apache.atlas.AtlasClient;
-import org.apache.atlas.GraphTransaction;
+import org.apache.atlas.annotation.GraphTransaction;
 import org.apache.atlas.discovery.DiscoveryException;
 import org.apache.atlas.discovery.DiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -43,7 +33,6 @@ import org.apache.atlas.query.QueryParser;
 import org.apache.atlas.query.QueryProcessor;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.MetadataRepository;
-import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
@@ -56,14 +45,24 @@ import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import org.springframework.stereotype.Component;
 import scala.util.Either;
 import scala.util.parsing.combinator.Parsers;
+
+import javax.inject.Inject;
+import javax.inject.Singleton;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Graph backed implementation of Search.
  */
 @Singleton
+@Component
 public class GraphBackedDiscoveryService implements DiscoveryService {
 
     private static final Logger LOG = LoggerFactory.getLogger(GraphBackedDiscoveryService.class);
@@ -72,11 +71,27 @@ public class GraphBackedDiscoveryService implements DiscoveryService {
     private final DefaultGraphPersistenceStrategy graphPersistenceStrategy;
 
     public final static String SCORE = "score";
+    /**
+     * Where the vertex' internal gremlin id is stored in the Map produced by extractResult()
+     */
+    public final static String GREMLIN_ID_KEY = "id";
+    /**
+     * Where the id of an edge's incoming vertex is stored in the Map produced by extractResult()
+     */
+    public final static String GREMLIN_INVERTEX_KEY = "inVertex";
+    /**
+     * Where the id of an edge's outgoing vertex is stored in the Map produced by extractResult()
+     */
+    public final static String GREMLIN_OUTVERTEX_KEY = "outVertex";
+    /**
+     * Where an edge's label is stored in the Map produced by extractResult()
+     */
+    public final static String GREMLIN_LABEL_KEY = "label";
 
     @Inject
-    GraphBackedDiscoveryService(MetadataRepository metadataRepository)
+    GraphBackedDiscoveryService(MetadataRepository metadataRepository, AtlasGraph atlasGraph)
     throws DiscoveryException {
-        this.graph = AtlasGraphProvider.getGraphInstance();
+        this.graph = atlasGraph;
         this.graphPersistenceStrategy = new DefaultGraphPersistenceStrategy(metadataRepository);
     }
 
@@ -224,15 +239,16 @@ public class GraphBackedDiscoveryService implements DiscoveryService {
                             oRow.put(key, propertyValue.toString());
                         }
                     }
+                    oRow.put(GREMLIN_ID_KEY, vertex.getId().toString());
 
                 } else if (value instanceof String) {
                     oRow.put("", value.toString());
                 } else if(value instanceof AtlasEdge) {
                     AtlasEdge edge = (AtlasEdge) value;
-                    oRow.put("id", edge.getId().toString());
-                    oRow.put("label", edge.getLabel());
-                    oRow.put("inVertex", edge.getInVertex().getId().toString());
-                    oRow.put("outVertex", edge.getOutVertex().getId().toString());
+                    oRow.put(GREMLIN_ID_KEY, edge.getId().toString());
+                    oRow.put(GREMLIN_LABEL_KEY, edge.getLabel());
+                    oRow.put(GREMLIN_INVERTEX_KEY, edge.getInVertex().getId().toString());
+                    oRow.put(GREMLIN_OUTVERTEX_KEY, edge.getOutVertex().getId().toString());
                     for (String propertyKey : edge.getPropertyKeys()) {
                         oRow.put(propertyKey, GraphHelper.getProperty(edge, propertyKey).toString());
                     }

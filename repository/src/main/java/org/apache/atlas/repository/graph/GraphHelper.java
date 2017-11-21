@@ -24,7 +24,12 @@ import com.google.common.collect.HashBiMap;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity.Status;
+import org.apache.atlas.model.instance.AtlasObjectId;
+import org.apache.atlas.model.instance.AtlasRelationship;
+import org.apache.atlas.model.typedef.AtlasRelationshipDef;
+import org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
@@ -34,6 +39,9 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v1.AtlasGraphUtilsV1;
+import org.apache.atlas.type.AtlasEntityType;
+import org.apache.atlas.type.AtlasRelationshipType;
+import org.apache.atlas.type.AtlasStructType;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.typesystem.IReferenceableInstance;
 import org.apache.atlas.typesystem.ITypedInstance;
@@ -259,31 +267,42 @@ public final class GraphHelper {
      * Searches for a AtlasVertex with prop1=key1 && prop2=key2
      * @param args
      * @return AtlasVertex with the given property keys
-     * @throws EntityNotFoundException
+     * @throws AtlasBaseException
      */
     public AtlasVertex findVertex(Object... args) throws EntityNotFoundException {
+        return (AtlasVertex) findElement(true, args);
+    }
+
+    /**
+     * Args of the format prop1, key1, prop2, key2...
+     * Searches for a AtlasEdge with prop1=key1 && prop2=key2
+     * @param args
+     * @return AtlasEdge with the given property keys
+     * @throws AtlasBaseException
+     */
+    public AtlasEdge findEdge(Object... args) throws EntityNotFoundException {
+        return (AtlasEdge) findElement(false, args);
+    }
+
+    private AtlasElement findElement(boolean isVertexSearch, Object... args) throws EntityNotFoundException {
         AtlasGraphQuery query = graph.query();
-        for (int i = 0 ; i < args.length; i+=2) {
-            query = query.has((String) args[i], args[i+1]);
+
+        for (int i = 0; i < args.length; i += 2) {
+            query = query.has((String) args[i], args[i + 1]);
         }
 
-        Iterator<AtlasVertex> results = query.vertices().iterator();
-        // returning one since entityType, qualifiedName should be unique
-        AtlasVertex vertex = results.hasNext() ? results.next() : null;
+        Iterator<AtlasElement> results = isVertexSearch ? query.vertices().iterator() : query.edges().iterator();
+        AtlasElement           element = (results != null && results.hasNext()) ? results.next() : null;
 
-        if (vertex == null) {
-            String conditionStr = getConditionString(args);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Could not find a vertex with {}", conditionStr);
-            }
-            throw new EntityNotFoundException("Could not find an entity in the repository with " + conditionStr);
-        } else {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Found a vertex {} with {}", string(vertex), getConditionString(args));
-            }
+        if (element == null) {
+            throw new EntityNotFoundException("Could not find " + (isVertexSearch ? "vertex" : "edge") + " with condition: " + getConditionString(args));
         }
 
-        return vertex;
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Found {} with condition {}", string(element), getConditionString(args));
+        }
+
+        return element;
     }
 
     //In some cases of parallel APIs, the edge is added, but get edge by label doesn't return the edge. ATLAS-1104
@@ -328,8 +347,46 @@ public final class GraphHelper {
         return null;
     }
 
+    public Iterator<AtlasEdge> getIncomingEdgesByLabel(AtlasVertex instanceVertex, String edgeLabel) {
+        return getAdjacentEdgesByLabel(instanceVertex, AtlasEdgeDirection.IN, edgeLabel);
+    }
+
     public Iterator<AtlasEdge> getOutGoingEdgesByLabel(AtlasVertex instanceVertex, String edgeLabel) {
         return getAdjacentEdgesByLabel(instanceVertex, AtlasEdgeDirection.OUT, edgeLabel);
+    }
+
+    public AtlasEdge getEdgeForLabel(AtlasVertex vertex, String edgeLabel, AtlasRelationshipEdgeDirection edgeDirection) {
+        AtlasEdge ret;
+
+        switch (edgeDirection) {
+            case IN:
+                ret = getEdgeForLabel(vertex, edgeLabel, AtlasEdgeDirection.IN);
+                break;
+
+            case OUT:
+            default:
+                ret = getEdgeForLabel(vertex, edgeLabel, AtlasEdgeDirection.OUT);
+                break;
+        }
+
+        return ret;
+    }
+
+    public Iterator<AtlasEdge> getEdgesForLabel(AtlasVertex vertex, String edgeLabel, AtlasRelationshipEdgeDirection edgeDirection) {
+        Iterator<AtlasEdge> ret;
+
+        switch (edgeDirection) {
+            case IN:
+                ret = getIncomingEdgesByLabel(vertex, edgeLabel);
+                break;
+
+            case OUT:
+            default:
+                ret = getOutGoingEdgesByLabel(vertex, edgeLabel);
+                break;
+        }
+
+        return ret;
     }
 
     /**
@@ -340,7 +397,11 @@ public final class GraphHelper {
      * @return
      */
     public AtlasEdge getEdgeForLabel(AtlasVertex vertex, String edgeLabel) {
-        Iterator<AtlasEdge> iterator = getAdjacentEdgesByLabel(vertex, AtlasEdgeDirection.OUT, edgeLabel);
+        return getEdgeForLabel(vertex, edgeLabel, AtlasEdgeDirection.OUT);
+    }
+
+    public AtlasEdge getEdgeForLabel(AtlasVertex vertex, String edgeLabel, AtlasEdgeDirection edgeDirection) {
+        Iterator<AtlasEdge> iterator = getAdjacentEdgesByLabel(vertex, edgeDirection, edgeLabel);
         AtlasEdge latestDeletedEdge = null;
         long latestDeletedEdgeTime = Long.MIN_VALUE;
 
@@ -534,6 +595,9 @@ public final class GraphHelper {
         return findVertex(Constants.GUID_PROPERTY_KEY, guid);
     }
 
+    public AtlasEdge getEdgeForGUID(String guid) throws EntityNotFoundException {
+        return findEdge(Constants.GUID_PROPERTY_KEY, guid);
+    }
 
     /**
      * Finds the Vertices that correspond to the given property values.  Property
@@ -646,12 +710,12 @@ public final class GraphHelper {
         return getIdFromVertex(getTypeName(vertex), vertex);
     }
 
-    public static String getGuid(AtlasVertex vertex) {
-        return vertex.<String>getProperty(Constants.GUID_PROPERTY_KEY, String.class);
+    public static String getGuid(AtlasElement element) {
+        return element.<String>getProperty(Constants.GUID_PROPERTY_KEY, String.class);
     }
 
-    public static String getTypeName(AtlasVertex instanceVertex) {
-        return instanceVertex.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
+    public static String getTypeName(AtlasElement element) {
+        return element.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
     }
 
     public static Id.EntityState getState(AtlasElement element) {
@@ -663,14 +727,16 @@ public final class GraphHelper {
         return element.getProperty(Constants.VERSION_PROPERTY_KEY, Integer.class);
     }
 
-
-
     public static String getStateAsString(AtlasElement element) {
         return element.getProperty(Constants.STATE_PROPERTY_KEY, String.class);
     }
 
     public static Status getStatus(AtlasElement element) {
         return (getState(element) == Id.EntityState.DELETED) ? Status.DELETED : Status.ACTIVE;
+    }
+
+    public static AtlasRelationship.Status getEdgeStatus(AtlasElement element) {
+        return (getState(element) == Id.EntityState.DELETED) ? AtlasRelationship.Status.DELETED : AtlasRelationship.Status.ACTIVE;
     }
 
     //Added conditions in fetching system attributes to handle test failures in GremlinTest where these properties are not set
@@ -1204,5 +1270,94 @@ public final class GraphHelper {
         }
 
         return condition.toString();
+    }
+
+    /**
+     * Get relationshipDef name from entityType using relationship attribute.
+     * if more than one relationDefs are returned for an attribute.
+     * e.g. hive_column.table
+     *
+     * hive_table.columns       -> hive_column.table
+     * hive_table.partitionKeys -> hive_column.table
+     *
+     * resolve by comparing all incoming edges typename with relationDefs name returned for an attribute
+     * to pick the right relationshipDef name
+     */
+    public String getRelationshipDefName(AtlasVertex entityVertex, AtlasEntityType entityType, String attributeName) {
+        AtlasRelationshipDef relationshipDef = getRelationshipDef(entityVertex, entityType, attributeName);
+
+        return (relationshipDef != null) ? relationshipDef.getName() : null;
+    }
+
+    public AtlasRelationshipDef getRelationshipDef(AtlasVertex entityVertex, AtlasEntityType entityType, String attributeName) {
+        List<AtlasRelationshipType> relationshipTypes = entityType.getRelationshipAttributeType(attributeName);
+        AtlasRelationshipDef        ret               = null;
+
+        if (relationshipTypes.size() > 1) {
+            Iterator<AtlasEdge> iter = entityVertex.getEdges(AtlasEdgeDirection.IN).iterator();
+
+            while (iter.hasNext() && ret == null) {
+                String edgeTypeName = AtlasGraphUtilsV1.getTypeName(iter.next());
+
+                for (AtlasRelationshipType relationType : relationshipTypes) {
+                    AtlasRelationshipDef relationshipDef = relationType.getRelationshipDef();
+
+                    if (StringUtils.equals(edgeTypeName, relationshipDef.getName())) {
+                        ret = relationshipDef;
+
+                        break;
+                    }
+                }
+            }
+
+            if (ret == null) {
+                ret = relationshipTypes.get(0).getRelationshipDef();
+            }
+
+        } else {
+            //relationshipTypes will have at least one relationshipDef
+            ret = relationshipTypes.get(0).getRelationshipDef();
+        }
+
+        return ret;
+    }
+
+    public static boolean isRelationshipEdge(AtlasEdge edge) {
+        if (edge == null) {
+            return false;
+        }
+
+        String edgeLabel = edge.getLabel();
+
+        return StringUtils.isNotEmpty(edge.getLabel()) ? edgeLabel.startsWith("r:") : false;
+    }
+
+    public static AtlasObjectId getReferenceObjectId(AtlasEdge edge, AtlasRelationshipEdgeDirection relationshipDirection) {
+        AtlasObjectId ret = null;
+
+        if (relationshipDirection == AtlasRelationshipEdgeDirection.OUT) {
+            ret = new AtlasObjectId(getGuid(edge.getInVertex()), getTypeName(edge.getInVertex()));
+
+        } else if (relationshipDirection == AtlasRelationshipEdgeDirection.IN) {
+            ret = new AtlasObjectId(getGuid(edge.getOutVertex()), getTypeName(edge.getOutVertex()));
+        }
+
+        return ret;
+    }
+
+    public static AtlasObjectId getCurrentObjectId(AtlasEdge edge, AtlasRelationshipEdgeDirection relationshipDirection) {
+        String typeName = null;
+        String guid     = null;
+
+        if (relationshipDirection == AtlasRelationshipEdgeDirection.OUT) {
+            typeName = GraphHelper.getTypeName(edge.getOutVertex());
+            guid     = GraphHelper.getGuid(edge.getOutVertex());
+
+        } else if (relationshipDirection == AtlasRelationshipEdgeDirection.IN) {
+            typeName = GraphHelper.getTypeName(edge.getInVertex());
+            guid     = GraphHelper.getGuid(edge.getInVertex());
+        }
+
+        return new AtlasObjectId(guid, typeName);
     }
 }

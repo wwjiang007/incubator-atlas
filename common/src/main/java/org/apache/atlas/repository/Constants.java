@@ -57,6 +57,11 @@ public final class Constants {
     public static final String TYPEVERSION_PROPERTY_KEY = INTERNAL_PROPERTY_KEY_PREFIX + "type.version";
     public static final String TYPEOPTIONS_PROPERTY_KEY = INTERNAL_PROPERTY_KEY_PREFIX + "type.options";
 
+    // relationship def constants
+    public static final String RELATIONSHIPTYPE_END1_KEY = "endDef1";
+    public static final String RELATIONSHIPTYPE_END2_KEY = "endDef2";
+    public static final String RELATIONSHIPTYPE_CATEGORY_KEY = "relationshipCategory";
+    public static final String RELATIONSHIPTYPE_TAG_PROPAGATION_KEY = "tagPropagation";
     /**
      * Trait names property key and index name.
      */
@@ -91,6 +96,9 @@ public final class Constants {
 
     public static final String QUALIFIED_NAME = "Referenceable.qualifiedName";
     public static final String TYPE_NAME_PROPERTY_KEY = INTERNAL_PROPERTY_KEY_PREFIX + "typeName";
+    public static final String INDEX_SEARCH_MAX_RESULT_SET_SIZE = "atlas.graph.index.search.max-result-set-size";
+    public static final String INDEX_SEARCH_TYPES_MAX_QUERY_STR_LENGTH = "atlas.graph.index.search.types.max-query-str-length";
+    public static final String INDEX_SEARCH_TAGS_MAX_QUERY_STR_LENGTH  = "atlas.graph.index.search.tags.max-query-str-length";
 
     private Constants() {
     }

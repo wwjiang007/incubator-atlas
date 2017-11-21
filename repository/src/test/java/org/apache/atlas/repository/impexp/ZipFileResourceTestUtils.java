@@ -18,6 +18,7 @@
 package org.apache.atlas.repository.impexp;
 
 import com.google.common.collect.Sets;
+import org.apache.atlas.RequestContextV1;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.impexp.AtlasExportResult;
 import org.apache.atlas.model.impexp.AtlasImportRequest;
@@ -31,7 +32,6 @@ import org.apache.commons.io.FileUtils;
 import org.apache.solr.common.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testng.Assert;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -41,6 +41,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import static org.testng.Assert.*;
 
 public class ZipFileResourceTestUtils {
     public static final Logger LOG = LoggerFactory.getLogger(ZipFileResourceTestUtils.class);
@@ -67,7 +69,7 @@ public class ZipFileResourceTestUtils {
         String filePath = userDir + "/../addons/models/" + fileName;
         File f = new File(filePath);
         String s = FileUtils.readFileToString(f);
-        Assert.assertFalse(StringUtils.isEmpty(s), "Model file read correctly!");
+        assertFalse(StringUtils.isEmpty(s), "Model file read correctly!");
 
         return s;
     }
@@ -84,8 +86,8 @@ public class ZipFileResourceTestUtils {
         Set<String> rhs = com.google.common.collect.Sets.newHashSet(processedEntities);
         Set<String> difference = Sets.difference(lhs, rhs);
 
-        Assert.assertNotNull(difference);
-        Assert.assertEquals(difference.size(), 0);
+        assertNotNull(difference);
+        assertEquals(difference.size(), 0);
     }
 
     public static void verifyImportedMetrics(AtlasExportResult exportResult, AtlasImportResult importResult) {
@@ -96,8 +98,8 @@ public class ZipFileResourceTestUtils {
                     entry.getKey().contains("Column") ||
                     entry.getKey().contains("StorageDesc")) continue;
 
-            Assert.assertTrue(metricsForCompare.containsKey(entry.getKey()));
-            Assert.assertEquals(entry.getValue(), metricsForCompare.get(entry.getKey()));
+            assertTrue(metricsForCompare.containsKey(entry.getKey()), entry.getKey());
+            assertEquals(entry.getValue(), metricsForCompare.get(entry.getKey()), entry.getKey());
         }
     }
 
@@ -140,7 +142,7 @@ public class ZipFileResourceTestUtils {
         final String userName = "admin";
 
         AtlasImportResult result = importService.run(source, request, userName, hostName, requestingIP);
-        Assert.assertEquals(result.getOperationStatus(), AtlasImportResult.OperationStatus.SUCCESS);
+        assertEquals(result.getOperationStatus(), AtlasImportResult.OperationStatus.SUCCESS);
         return result;
     }
 
@@ -148,10 +150,12 @@ public class ZipFileResourceTestUtils {
         AtlasExportResult exportResult = zipSource.getExportResult();
         List<String> creationOrder = zipSource.getCreationOrder();
 
+        RequestContextV1.clear();
+
         AtlasImportRequest request = getDefaultImportRequest();
         AtlasImportResult result = runImportWithParameters(importService, request, zipSource);
 
-        Assert.assertNotNull(result);
+        assertNotNull(result);
         verifyImportedMetrics(exportResult, result);
         verifyImportedEntities(creationOrder, result.getProcessedEntities());
     }

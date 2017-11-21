@@ -18,14 +18,12 @@
 
 package org.apache.atlas.web.security;
 
-import java.io.File;
-import java.util.Collection;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.web.TestUtils;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.apache.commons.io.FileUtils;
-import org.junit.Assert;
 import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
@@ -33,13 +31,18 @@ import org.springframework.context.support.ClassPathXmlApplicationContext;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
-import org.testng.annotations.Test;
-import org.mockito.MockitoAnnotations;
 import org.testng.annotations.BeforeMethod;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.testng.annotations.Test;
+
+import java.io.File;
+import java.util.Collection;
+
 import static org.mockito.Mockito.when;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertTrue;
 
 public class FileAuthenticationTest {
 
@@ -69,7 +72,7 @@ public class FileAuthenticationTest {
         System.setProperty("atlas.conf", persistDir);
 
         applicationContext = new ClassPathXmlApplicationContext(
-                "spring-security.xml");
+                "test-spring-security.xml");
         authProvider = applicationContext
                 .getBean(org.apache.atlas.web.security.AtlasAuthenticationProvider.class);
 
@@ -116,7 +119,7 @@ public class FileAuthenticationTest {
         Authentication auth = authProvider.authenticate(authentication);
         LOG.debug(" {}", auth);
 
-        Assert.assertTrue(auth.isAuthenticated());
+        assertTrue(auth.isAuthenticated());
     }
 
     @Test
@@ -129,7 +132,7 @@ public class FileAuthenticationTest {
             Authentication auth = authProvider.authenticate(authentication);
            LOG.debug(" {}", auth);
         } catch (BadCredentialsException bcExp) {
-            Assert.assertEquals("Wrong password", bcExp.getMessage());
+            assertEquals("Wrong password", bcExp.getMessage());
         }
     }
 
@@ -142,7 +145,7 @@ public class FileAuthenticationTest {
             Authentication auth = authProvider.authenticate(authentication);
           LOG.debug(" {}", auth);
         } catch (UsernameNotFoundException uExp) {
-            Assert.assertTrue(uExp.getMessage().contains("Username not found."));
+            assertTrue(uExp.getMessage().contains("Username not found."));
         }
     }
 
@@ -155,7 +158,7 @@ public class FileAuthenticationTest {
             Authentication auth = authProvider.authenticate(authentication);
             LOG.debug(" {}", auth);
         } catch (AtlasAuthenticationException uExp) {
-            Assert.assertTrue(uExp.getMessage().startsWith("User role credentials is not set properly for"));
+            assertTrue(uExp.getMessage().startsWith("User role credentials is not set properly for"));
         }
     }
 
@@ -169,7 +172,7 @@ public class FileAuthenticationTest {
             Authentication auth = authProvider.authenticate(authentication);
             LOG.debug(" {}", auth);
         } catch (UsernameNotFoundException uExp) {
-            Assert.assertTrue(uExp.getMessage().startsWith("Username not found"));
+            assertTrue(uExp.getMessage().startsWith("Username not found"));
         }
     }
 
@@ -182,7 +185,7 @@ public class FileAuthenticationTest {
         Authentication auth = authProvider.authenticate(authentication);
         LOG.debug(" {}", auth);
 
-        Assert.assertTrue(auth.isAuthenticated());
+        assertTrue(auth.isAuthenticated());
 
         Collection<? extends GrantedAuthority> authorities = auth.getAuthorities();
 
@@ -190,7 +193,7 @@ public class FileAuthenticationTest {
         for (GrantedAuthority gauth : authorities) {
             role = gauth.getAuthority();
         }
-        Assert.assertTrue("ADMIN".equals(role));
+        assertTrue("ADMIN".equals(role));
     }
 
 

@@ -23,8 +23,8 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.apache.atlas.repository.store.graph.v1.EntityImportStream;
-import org.codehaus.jackson.map.ObjectMapper;
-import org.codehaus.jackson.type.TypeReference;
+import org.apache.atlas.type.AtlasType;
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,23 +38,34 @@ import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-import static org.apache.atlas.AtlasErrorCode.JSON_ERROR_OBJECT_MAPPER_NULL_RETURNED;
-
 
 public class ZipSource implements EntityImportStream {
     private static final Logger LOG = LoggerFactory.getLogger(ZipSource.class);
 
-    private final InputStream                   inputStream;
-    private List<String>                        creationOrder;
-    private Iterator<String>                    iterator;
-    private Map<String, String>                 guidEntityJsonMap;
+    private final InputStream    inputStream;
+    private List<String>         creationOrder;
+    private Iterator<String>     iterator;
+    private Map<String, String>  guidEntityJsonMap;
+    private ImportTransforms     importTransform;
+    private int currentPosition;
 
     public ZipSource(InputStream inputStream) throws IOException {
-        this.inputStream = inputStream;
-        guidEntityJsonMap = new HashMap<>();
+        this(inputStream, null);
+    }
+
+    public ZipSource(InputStream inputStream, ImportTransforms importTransform) throws IOException {
+        this.inputStream       = inputStream;
+        this.guidEntityJsonMap = new HashMap<>();
+        this.importTransform   = importTransform;
 
         updateGuidZipEntryMap();
-        this.setCreationOrder();
+        setCreationOrder();
+    }
+
+    public ImportTransforms getImportTransform() { return this.importTransform; }
+
+    public void setImportTransform(ImportTransforms importTransform) {
+        this.importTransform = importTransform;
     }
 
     public AtlasTypesDef getTypesDef() throws AtlasBaseException {
@@ -76,7 +87,7 @@ public class ZipSource implements EntityImportStream {
 
         try {
             String s = getFromCache(fileName);
-            this.creationOrder = convertFromJson(new TypeReference<List<String>>(){}, s);
+            this.creationOrder = convertFromJson(List.class, s);
             this.iterator = this.creationOrder.iterator();
         } catch (AtlasBaseException e) {
             LOG.error(String.format("Error retrieving '%s' from zip.", fileName), e);
@@ -113,31 +124,19 @@ public class ZipSource implements EntityImportStream {
     }
 
     public AtlasEntity.AtlasEntityWithExtInfo getEntityWithExtInfo(String guid) throws AtlasBaseException {
-        String s = (String) getFromCache(guid);
+        String s = getFromCache(guid);
         AtlasEntity.AtlasEntityWithExtInfo entityWithExtInfo = convertFromJson(AtlasEntity.AtlasEntityWithExtInfo.class, s);
-        return entityWithExtInfo;
-    }
 
-    private <T> T convertFromJson(TypeReference clazz, String jsonData) throws AtlasBaseException {
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-
-            T ret = mapper.readValue(jsonData, clazz);
-            if(ret == null) {
-                throw new AtlasBaseException(JSON_ERROR_OBJECT_MAPPER_NULL_RETURNED, clazz.toString());
-            }
-
-            return ret;
-        } catch (Exception e) {
-            throw new AtlasBaseException("Error converting file to JSON.", e);
+        if (importTransform != null) {
+            entityWithExtInfo = importTransform.apply(entityWithExtInfo);
         }
+
+        return entityWithExtInfo;
     }
 
     private <T> T convertFromJson(Class<T> clazz, String jsonData) throws AtlasBaseException {
         try {
-            ObjectMapper mapper = new ObjectMapper();
-
-            return mapper.readValue(jsonData, clazz);
+            return AtlasType.fromJson(jsonData, clazz);
 
         } catch (Exception e) {
             throw new AtlasBaseException("Error converting file to JSON.", e);
@@ -173,6 +172,7 @@ public class ZipSource implements EntityImportStream {
     @Override
     public AtlasEntityWithExtInfo getNextEntityWithExtInfo() {
         try {
+            currentPosition++;
             return getEntityWithExtInfo(this.iterator.next());
         } catch (AtlasBaseException e) {
             e.printStackTrace();
@@ -193,9 +193,10 @@ public class ZipSource implements EntityImportStream {
     @Override
     public AtlasEntity getByGuid(String guid)  {
         try {
-            return getEntity(guid);
+            AtlasEntity entity = getEntity(guid);
+            return entity;
         } catch (AtlasBaseException e) {
-            e.printStackTrace();
+            LOG.error("getByGuid: {} failed!", guid, e);
             return null;
         }
     }
@@ -209,8 +210,43 @@ public class ZipSource implements EntityImportStream {
         return null;
     }
 
+    public int size() {
+        return this.creationOrder.size();
+    }
+
     @Override
     public void onImportComplete(String guid) {
         guidEntityJsonMap.remove(guid);
     }
+
+
+    @Override
+    public void setPosition(int index) {
+        currentPosition = index;
+        reset();
+        for (int i = 0; i < creationOrder.size() && i <= index; i++) {
+            iterator.next();
+        }
+    }
+
+    @Override
+    public void setPositionUsingEntityGuid(String guid) {
+        if(StringUtils.isBlank(guid)) {
+            return;
+        }
+
+        int index = creationOrder.indexOf(guid);
+        if (index == -1) {
+            return;
+        }
+
+        setPosition(index);
+    }
+
+    @Override
+    public int getPosition() {
+        return currentPosition;
+    }
+
+
 }

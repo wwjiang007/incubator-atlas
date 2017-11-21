@@ -37,8 +37,20 @@ define(['require',
             parseRecords: function(resp, options) {
                 this.queryType = resp.queryType;
                 this.queryText = resp.queryText;
+                this.referredEntities = resp.referredEntities;
                 return resp.entities ? resp.entities : [];
             },
+            getBasicRearchResult: function(options) {
+                var url = UrlLinks.searchApiUrl('basic');
+
+                options = _.extend({
+                    contentType: 'application/json',
+                    dataType: 'json',
+                }, options);
+                options.data = JSON.stringify(options.data);
+
+                return this.constructor.nonCrudOperation.call(this, url, 'POST', options);
+            }
         },
         //Static Class Members
         {

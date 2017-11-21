@@ -20,9 +20,8 @@ package org.apache.atlas;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.sun.jersey.api.client.WebResource;
+import org.apache.atlas.model.legacy.EntityResult;
 import org.apache.atlas.typesystem.Referenceable;
 import org.apache.atlas.typesystem.Struct;
 import org.apache.atlas.typesystem.TypesDef;
@@ -36,10 +35,6 @@ import org.apache.atlas.typesystem.types.utils.TypesUtil;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.security.UserGroupInformation;
-import org.codehaus.jackson.annotate.JsonAutoDetect;
-import org.codehaus.jackson.annotate.JsonIgnore;
-import org.codehaus.jackson.annotate.JsonIgnoreProperties;
-import org.codehaus.jackson.map.annotate.JsonSerialize;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
@@ -47,20 +42,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.ws.rs.HttpMethod;
+import javax.ws.rs.core.Cookie;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
-import javax.xml.bind.annotation.XmlAccessType;
-import javax.xml.bind.annotation.XmlAccessorType;
-import javax.xml.bind.annotation.XmlRootElement;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-
-import static org.codehaus.jackson.annotate.JsonAutoDetect.Visibility.NONE;
-import static org.codehaus.jackson.annotate.JsonAutoDetect.Visibility.PUBLIC_ONLY;
 
 /**
  * Client for metadata.
@@ -126,9 +114,33 @@ public class AtlasClient extends AtlasBaseClient {
 
     public static final String UNKNOWN_STATUS = "Unknown status";
 
-    // New constuctor for Basic auth
-    public AtlasClient(String[] baseUrl, String[] basicAuthUserNamepassword) {
-        super(baseUrl, basicAuthUserNamepassword);
+    /**
+     * Constructor for AtlasClient with cookie params as header
+     * @param baseUrl
+     * @param cookieName
+     * @param value
+     * @param path
+     * @param domain
+     */
+
+    public AtlasClient(String[] baseUrl, String cookieName, String value, String path, String domain) {
+        super(baseUrl, new Cookie( cookieName, value, path, domain));
+    }
+
+    /**
+     * Constructor for AtlasClient with cookie as header
+     * @param baseUrl
+     * @param cookie
+     */
+
+    public AtlasClient(String[] baseUrl, Cookie cookie) {
+        super(baseUrl, cookie);
+    }
+
+
+    // New constructor for Basic auth
+    public AtlasClient(String[] baseUrl, String[] basicAuthUserNamePassword) {
+        super(baseUrl, basicAuthUserNamePassword);
     }
 
     /**
@@ -165,8 +177,8 @@ public class AtlasClient extends AtlasBaseClient {
     }
 
     @VisibleForTesting
-    public AtlasClient(Configuration configuration, String[] baseUrl, String[] basicAuthUserNamepassword) {
-        super(configuration, baseUrl, basicAuthUserNamepassword);
+    public AtlasClient(Configuration configuration, String[] baseUrl, String[] basicAuthUserNamePassword) {
+        super(configuration, baseUrl, basicAuthUserNamePassword);
     }
 
     @VisibleForTesting
@@ -252,76 +264,6 @@ public class AtlasClient extends AtlasBaseClient {
 
         public Response.Status getExpectedStatus() {
             return status;
-        }
-    }
-
-    @JsonAutoDetect(getterVisibility=PUBLIC_ONLY, setterVisibility=PUBLIC_ONLY, fieldVisibility=NONE)
-    @JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
-    @JsonIgnoreProperties(ignoreUnknown=true)
-    @XmlRootElement
-    @XmlAccessorType(XmlAccessType.PROPERTY)
-    public static class EntityResult {
-        private static final Gson gson = new GsonBuilder().setPrettyPrinting().create();
-
-        public static final String OP_CREATED = "created";
-        public static final String OP_UPDATED = "updated";
-        public static final String OP_DELETED = "deleted";
-
-        Map<String, List<String>> entities = new HashMap<>();
-
-        public EntityResult() {
-            //For gson
-        }
-
-        public EntityResult(List<String> created, List<String> updated, List<String> deleted) {
-            set(OP_CREATED, created);
-            set(OP_UPDATED, updated);
-            set(OP_DELETED, deleted);
-        }
-
-        public void set(String type, List<String> list) {
-            if (list != null && list.size() > 0) {
-                entities.put(type, list);
-            }
-        }
-
-        private List<String> get(String type) {
-            List<String> list = entities.get(type);
-            if (list == null) {
-                list = new ArrayList<>();
-            }
-            return list;
-        }
-
-        public Map<String, List<String>> getEntities(){
-            return entities;
-        }
-
-        public void setEntities(Map<String, List<String>> entities){
-            this.entities = entities;
-        }
-
-        @JsonIgnore
-        public List<String> getCreatedEntities() {
-            return get(OP_CREATED);
-        }
-
-        @JsonIgnore
-        public List<String> getUpdateEntities() {
-            return get(OP_UPDATED);
-        }
-
-
-        @JsonIgnore
-        public List<String> getDeletedEntities() {
-            return get(OP_DELETED);
-        }
-
-        @Override
-        public String toString() { return gson.toJson(this); }
-
-        public static EntityResult fromString(String json) throws AtlasServiceException {
-            return gson.fromJson(json, EntityResult.class);
         }
     }
 
@@ -470,11 +412,6 @@ public class AtlasClient extends AtlasBaseClient {
             JSONObject response = callAPIWithBodyAndParams(API.GET_TYPE, null, typeName);
             String typeJson = response.getString(DEFINITION);
             return TypesSerialization.fromJson(typeJson);
-        } catch (AtlasServiceException e) {
-            if (Response.Status.NOT_FOUND.equals(e.getStatus())) {
-                return null;
-            }
-            throw e;
         } catch (JSONException e) {
             throw new AtlasServiceException(e);
         }

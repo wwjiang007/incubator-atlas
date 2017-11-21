@@ -35,7 +35,6 @@ import org.apache.atlas.model.typedef.AtlasEnumDef;
 import org.apache.atlas.model.typedef.AtlasStructDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
-import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.v1.EntityGraphRetriever;
 import org.apache.atlas.type.AtlasArrayType;
@@ -55,7 +54,9 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
+import javax.inject.Inject;
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
 import java.util.ArrayList;
@@ -68,6 +69,7 @@ import java.util.Set;
 
 import static org.apache.atlas.model.impexp.AtlasExportRequest.*;
 
+@Component
 public class ExportService {
     private static final Logger LOG = LoggerFactory.getLogger(ExportService.class);
 
@@ -76,10 +78,11 @@ public class ExportService {
     private final EntityGraphRetriever      entityGraphRetriever;
     private final AtlasGremlinQueryProvider gremlinQueryProvider;
 
-    public ExportService(final AtlasTypeRegistry typeRegistry) throws AtlasBaseException {
+    @Inject
+    public ExportService(final AtlasTypeRegistry typeRegistry, AtlasGraph atlasGraph) throws AtlasBaseException {
         this.typeRegistry         = typeRegistry;
         this.entityGraphRetriever = new EntityGraphRetriever(this.typeRegistry);
-        this.atlasGraph           = AtlasGraphProvider.getGraphInstance();
+        this.atlasGraph           = atlasGraph;
         this.gremlinQueryProvider = AtlasGremlinQueryProvider.INSTANCE;
     }
 
@@ -95,7 +98,6 @@ public class ExportService {
             AtlasExportResult.OperationStatus[] statuses = processItems(request, context);
 
             processTypesDef(context);
-
             updateSinkWithOperationMetrics(context, statuses, getOperationDuration(startTime));
         } catch(Exception ex) {
             LOG.error("Operation failed: ", ex);
@@ -110,6 +112,7 @@ public class ExportService {
     }
 
     private void updateSinkWithOperationMetrics(ExportContext context, AtlasExportResult.OperationStatus[] statuses, int duration) throws AtlasBaseException {
+        context.result.getData().getEntityCreationOrder().addAll(context.lineageProcessed);
         context.sink.setExportOrder(context.result.getData().getEntityCreationOrder());
         context.sink.setTypesDef(context.result.getData().getTypesDef());
         clearContextData(context);
@@ -198,9 +201,10 @@ public class ExportService {
                     processEntity(guid, context);
                 }
 
-                if (!context.guidsLineageToProcess.isEmpty()) {
-                    context.guidsToProcess.addAll(context.guidsLineageToProcess);
-                    context.guidsLineageToProcess.clear();
+                if (!context.lineageToProcess.isEmpty()) {
+                    context.guidsToProcess.addAll(context.lineageToProcess);
+                    context.lineageProcessed.addAll(context.lineageToProcess.getList());
+                    context.lineageToProcess.clear();
                 }
             }
         } catch (AtlasBaseException excp) {
@@ -292,7 +296,9 @@ public class ExportService {
             TraversalDirection      direction         = context.guidDirection.get(guid);
             AtlasEntityWithExtInfo  entityWithExtInfo = entityGraphRetriever.toAtlasEntityWithExtInfo(guid);
 
-            context.result.getData().getEntityCreationOrder().add(entityWithExtInfo.getEntity().getGuid());
+            if(!context.lineageProcessed.contains(guid)) {
+                context.result.getData().getEntityCreationOrder().add(entityWithExtInfo.getEntity().getGuid());
+            }
 
             addEntity(entityWithExtInfo, context);
             addTypes(entityWithExtInfo.getEntity(), context);
@@ -430,6 +436,10 @@ public class ExportService {
     }
 
     private void addEntity(AtlasEntityWithExtInfo entity, ExportContext context) throws AtlasBaseException {
+        if(context.sink.hasEntity(entity.getEntity().getGuid())) {
+            return;
+        }
+
         context.sink.add(entity);
 
         context.result.incrementMeticsCounter(String.format("entity:%s", entity.getEntity().getTypeName()));
@@ -600,7 +610,7 @@ public class ExportService {
         }
     }
 
-    private class UniqueList<T> {
+    public static class UniqueList<T> {
         private final List<T>   list = new ArrayList<>();
         private final Set<T>    set = new HashSet<>();
 
@@ -644,13 +654,18 @@ public class ExportService {
             list.clear();
             set.clear();
         }
+
+        public List<T> getList() {
+            return list;
+        }
     }
 
 
     private class ExportContext {
         final Set<String>                     guidsProcessed = new HashSet<>();
         final UniqueList<String>              guidsToProcess = new UniqueList<>();
-        final UniqueList<String>              guidsLineageToProcess = new UniqueList<>();
+        final UniqueList<String>              lineageToProcess = new UniqueList<>();
+        final Set<String>                     lineageProcessed = new HashSet<>();
         final Map<String, TraversalDirection> guidDirection  = new HashMap<>();
         final Set<String>                     entityTypes         = new HashSet<>();
         final Set<String>                     classificationTypes = new HashSet<>();
@@ -712,7 +727,7 @@ public class ExportService {
             }
 
             if(isSuperTypeProcess) {
-                guidsLineageToProcess.add(guid);
+                lineageToProcess.add(guid);
             }
 
             guidDirection.put(guid, direction);
